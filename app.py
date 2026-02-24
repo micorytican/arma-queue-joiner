@@ -67,7 +67,7 @@ class QueueJoiner:
         self.mouse_y = 0
         self.game_monitor = None
         self.attempt = 0
-        self.wait_after_click = 2.0
+        self.wait_after_click = 0.5
         self.escape_hold = 1.5
         self.pause_before_retry = 0.3
 
@@ -289,7 +289,7 @@ class App(tk.Tk):
         sf.pack(pady=(0, 10))
 
         ttk.Label(sf, text="Wait after click (sec):").grid(row=0, column=0, sticky="w", pady=3)
-        self.wait_var = tk.StringVar(value="2.0")
+        self.wait_var = tk.StringVar(value="0.5")
         self.wait_spin = ttk.Spinbox(sf, from_=0.5, to=10.0, increment=0.1, textvariable=self.wait_var, width=8)
         self.wait_spin.grid(row=0, column=1, padx=(10, 0), pady=3)
 
