@@ -23,7 +23,7 @@ When enabled, instead of pressing the ESC key, the program automatically finds t
 
 ## Download
 
-Go to Releases and download **ArmaQueueJoiner.exe**  
+Please use the Releases section of this repository to download the latest build.
 
 ## Run from source
 
