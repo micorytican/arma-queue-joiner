@@ -13,7 +13,7 @@ A small tool that keeps clicking the Join button on a full server until you get 
 Grab the latest `.exe` from the Releases page.
 
 ## How to use
-
+**NOTE**: Do not move your mouse while the program is running!
 1. Launch the tool
 2. In-game, open the server browser and find the server you want to join
 3. Hover your mouse over the **Join** button (don't click yet)
