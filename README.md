@@ -8,7 +8,7 @@ A small tool that keeps clicking the Join button on a full server until you get 
 
 ## Download
 
-Grab the latest `.exe` from the [Releases](../../releases) page — no Python needed.
+Grab the latest `.exe` from the Releases page.
 
 ## How to use
 
