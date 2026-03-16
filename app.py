@@ -1,20 +1,22 @@
 """
-Arma Reforger Queue Joiner | by lime98 
+Arma Reforger Queue Joiner | by lime98
 """
 
 import ctypes
 import ctypes.wintypes
+import os
+import sys
 import threading
 import time
 import tkinter as tk
 from tkinter import ttk
+
 import keyboard
 import mss
 import numpy as np
+import winsound
 from PIL import Image
-import winsound  # for alert
 
-# DPI awareness (best practice)
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except Exception:
@@ -26,25 +28,26 @@ except Exception:
 user32 = ctypes.windll.user32
 
 
+class _POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
 def move_and_click(x: int, y: int) -> None:
     user32.SetCursorPos(x, y)
     time.sleep(0.015)
-    user32.mouse_event(0x0002, 0, 0, 0, 0)  # left down
+    user32.mouse_event(0x0002, 0, 0, 0, 0)
     time.sleep(0.015)
-    user32.mouse_event(0x0004, 0, 0, 0, 0)  # left up
+    user32.mouse_event(0x0004, 0, 0, 0, 0)
 
 
 def press_escape(duration: float) -> None:
-    """Fallback keyboard ESC hold."""
     user32.keybd_event(0x1B, 0x01, 0x0008, 0)
     time.sleep(duration)
     user32.keybd_event(0x1B, 0x01, 0x000A, 0)
 
 
 def get_cursor_pos() -> tuple[int, int]:
-    class POINT(ctypes.Structure):
-        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-    pt = POINT()
+    pt = _POINT()
     user32.GetCursorPos(ctypes.byref(pt))
     return pt.x, pt.y
 
@@ -62,7 +65,7 @@ class QueueJoiner:
         self.on_log = on_log
         self.on_state_change = on_state_change
         self.running = False
-        self.experimental = False          # NEW: experimental mouse ESC
+        self.experimental = False
         self.mouse_x = 0
         self.mouse_y = 0
         self.game_monitor = None
@@ -72,7 +75,6 @@ class QueueJoiner:
         self.pause_before_retry = 0.3
 
     def read_colors(self):
-        """Optimized color read — single screenshot, cached crop."""
         with mss.mss() as sct:
             shot = sct.grab(self.game_monitor)
             img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
@@ -98,18 +100,16 @@ class QueueJoiner:
             arr = np.array(img)
 
         h, w = arr.shape[:2]
-        # Bottom-left region where "ESC Скасувати" button always lives
         roi = arr[int(h * 0.65):int(h * 0.95), int(w * 0.05):int(w * 0.45)]
 
-        # Precise yellow mask tuned to Arma Reforger UI (bright yellow/orange button)
         mask = (
             (roi[:, :, 0] > 200) &
             (roi[:, :, 1] > 160) &
             (roi[:, :, 2] < 90) &
-            (roi[:, :, 1] < 230)   # avoid pure green
+            (roi[:, :, 1] < 230)
         )
 
-        if np.sum(mask) < 300:   # robust threshold — button is ~500-800px
+        if np.sum(mask) < 300:  # button is ~500-800px when visible
             return None
 
         ys, xs = np.where(mask)
@@ -123,17 +123,15 @@ class QueueJoiner:
         return esc_x, esc_y
 
     def click_escape(self) -> None:
-        """Smart ESC handler — experimental mouse click or fallback keypress."""
         if self.experimental:
             pos = self.find_esc_position()
             if pos:
                 x, y = pos
                 move_and_click(x, y)
-                time.sleep(0.08)   # tiny delay after mouse click
+                time.sleep(0.08)
                 return
             self.on_log("ESC auto-detection failed → fallback to keypress")
 
-        # Original keyboard fallback
         press_escape(self.escape_hold)
 
     def start(self, mouse_x: int, mouse_y: int) -> None:
@@ -232,8 +230,6 @@ class App(tk.Tk):
         self.resizable(False, False)
         self.configure(bg="#1e1e1e")
 
-        # Icon (same as before)
-        import sys, os
         if getattr(sys, 'frozen', False):
             icon_path = os.path.join(sys._MEIPASS, "icon.ico")
         else:
@@ -269,7 +265,6 @@ class App(tk.Tk):
             justify="left",
         ).pack(padx=20, pady=(0, 10))
 
-        # Hotkeys
         hf = ttk.Frame(self)
         hf.pack(pady=(0, 8))
         ttk.Label(hf, text="Start:").grid(row=0, column=0, padx=(0, 5), pady=2)
@@ -284,7 +279,6 @@ class App(tk.Tk):
         sc2.grid(row=0, column=3, pady=2)
         sc2.bind("<<ComboboxSelected>>", lambda e: self._register_hotkeys())
 
-        # Settings with SPINBOX arrows (as requested)
         sf = ttk.Frame(self)
         sf.pack(pady=(0, 10))
 
@@ -298,7 +292,6 @@ class App(tk.Tk):
         self.esc_spin = ttk.Spinbox(sf, from_=0.1, to=5.0, increment=0.1, textvariable=self.esc_var, width=8)
         self.esc_spin.grid(row=1, column=1, padx=(10, 0), pady=3)
 
-        # EXPERIMENTAL TOGGLE
         self.experimental_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             sf,
@@ -309,7 +302,6 @@ class App(tk.Tk):
         self.status_label = ttk.Label(self, text="Status: Idle", style="Status.TLabel")
         self.status_label.pack(pady=(5, 3))
 
-        # Log
         lf = tk.Frame(self, bg="#1e1e1e")
         lf.pack(padx=20, pady=(0, 15), fill="both", expand=True)
         self.log_text = tk.Text(lf, bg="#111111", fg="#aaaaaa", font=("Consolas", 9), relief="flat", state="disabled", wrap="word")
