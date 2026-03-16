@@ -6,7 +6,7 @@ A small tool that keeps clicking the Join button on a full server until you get 
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)
 
-![Demo](assets/demo1.gif) 
+![Demo](assets/demo.gif) 
 
 ## Download
 
