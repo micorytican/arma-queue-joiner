@@ -38,11 +38,22 @@ pyinstaller ^
     --hidden-import=numpy ^
     --hidden-import=numpy.core ^
     --hidden-import=numpy.lib ^
+    --hidden-import=pystray ^
+    --hidden-import=pystray._util ^
+    --hidden-import=pystray.backends.win32 ^
+    --hidden-import=PIL ^
+    --hidden-import=PIL.Image ^
+    --hidden-import=PIL.BmpImagePlugin ^
+    --hidden-import=PIL.IcoImagePlugin ^
     --hidden-import=tkinter ^
     --hidden-import=tkinter.ttk ^
     --hidden-import=keyboard ^
     --hidden-import=winsound ^
     --hidden-import=pkg_resources ^
+    --exclude-module=numpy.f2py ^
+    --exclude-module=numpy.distutils ^
+    --exclude-module=numpy.testing ^
+    --exclude-module=numpy._core.tests ^
     --clean ^
     app.py
 
