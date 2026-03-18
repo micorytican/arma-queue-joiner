@@ -65,8 +65,9 @@ def fmt_elapsed(seconds: int) -> str:
 
 @dataclasses.dataclass
 class Settings:
-    wait_after_click: float = 0.5
-    escape_hold: float = 1.5
+    wait_after_click: float = 0.1
+    escape_hold: float = 0.1
+    pause_before_retry: float = 0.0
     experimental: bool = False
     start_hotkey: str = "F6"
     stop_hotkey: str = "F4"
@@ -111,9 +112,9 @@ class QueueJoiner:
         self.mouse_y = 0
         self.game_monitor = None
         self.attempt = 0
-        self.wait_after_click = 0.5
-        self.escape_hold = 1.5
-        self.pause_before_retry = 0.3
+        self.wait_after_click = 0.1
+        self.escape_hold = 0.1
+        self.pause_before_retry = 0.0
         self.mute = False
         self._sct = None
 
@@ -167,7 +168,7 @@ class QueueJoiner:
             if pos:
                 x, y = pos
                 move_and_click(x, y)
-                time.sleep(0.08)
+                time.sleep(0.05)
                 return
             self.on_log("ESC auto-detection failed → fallback to keypress")
 
@@ -225,7 +226,7 @@ class QueueJoiner:
                 self.attempt += 1
                 self.on_log(f"[{self.attempt}] Clicking server button...")
                 move_and_click(self.mouse_x, self.mouse_y)
-                time.sleep(0.2)
+                time.sleep(0.1)
                 move_and_click(self.mouse_x, self.mouse_y)
 
                 # Adaptive wait: exit as soon as server-full dialog appears
@@ -299,7 +300,7 @@ class QueueJoiner:
 
 class App(tk.Tk):
     WINDOW_WIDTH  = 440
-    WINDOW_HEIGHT = 490
+    WINDOW_HEIGHT = 515
     HOTKEY_OPTIONS = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
 
     def __init__(self):
@@ -424,17 +425,22 @@ class App(tk.Tk):
         ttk.Spinbox(sf, from_=0.1, to=5.0, increment=0.1, textvariable=self.esc_var, width=8).grid(row=1, column=1, padx=(10, 0), pady=3)
         self.esc_var.trace_add("write", lambda *_: self.after(0, self._save_settings))
 
+        ttk.Label(sf, text="Pause after ESC (sec):").grid(row=2, column=0, sticky="w", pady=3)
+        self.pause_var = tk.StringVar(value=str(self.settings.pause_before_retry))
+        ttk.Spinbox(sf, from_=0.0, to=2.0, increment=0.05, textvariable=self.pause_var, width=8).grid(row=2, column=1, padx=(10, 0), pady=3)
+        self.pause_var.trace_add("write", lambda *_: self.after(0, self._save_settings))
+
         self.experimental_var = tk.BooleanVar(value=self.settings.experimental)
         ttk.Checkbutton(
             sf, text="Experimental Mode: FAST ESC",
             variable=self.experimental_var, command=self._save_settings,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=4)
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=4)
 
         self.mute_var = tk.BooleanVar(value=self.settings.mute)
         ttk.Checkbutton(
             sf, text="Mute alert sound",
             variable=self.mute_var, command=self._save_settings,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=4)
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
 
         # Status
         self.status_label = ttk.Label(self, text="Status: Idle", style="Status.TLabel")
@@ -454,6 +460,7 @@ class App(tk.Tk):
         try:
             self.settings.wait_after_click = float(self.wait_var.get())
             self.settings.escape_hold = float(self.esc_var.get())
+            self.settings.pause_before_retry = float(self.pause_var.get())
             self.settings.experimental = bool(self.experimental_var.get())
             self.settings.mute = bool(self.mute_var.get())
             self.settings.start_hotkey = self.start_hotkey_var.get()
@@ -493,6 +500,7 @@ class App(tk.Tk):
         try:
             self.joiner.wait_after_click = float(self.wait_var.get())
             self.joiner.escape_hold = float(self.esc_var.get())
+            self.joiner.pause_before_retry = float(self.pause_var.get())
             self.joiner.experimental = self.experimental_var.get()
             self.joiner.mute = self.mute_var.get()
         except ValueError:

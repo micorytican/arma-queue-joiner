@@ -97,8 +97,9 @@ print("\n  [Settings]")
 
 @dataclasses.dataclass
 class _Settings:
-    wait_after_click: float = 0.5
-    escape_hold: float = 1.5
+    wait_after_click: float = 0.1
+    escape_hold: float = 0.1
+    pause_before_retry: float = 0.0
     experimental: bool = False
     start_hotkey: str = "F6"
     stop_hotkey: str = "F4"
@@ -134,7 +135,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # File doesn't exist -> defaults
     s = _Settings.load(p)
-    check("missing file -> defaults", s.wait_after_click == 0.5 and s.start_hotkey == "F6")
+    check("missing file -> defaults", s.wait_after_click == 0.1 and s.pause_before_retry == 0.0 and s.start_hotkey == "F6")
 
     # Round-trip defaults
     s.save(p)
@@ -143,12 +144,13 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Modified values
     s.wait_after_click = 2.3
+    s.pause_before_retry = 0.5
     s.experimental = True
     s.mute = True
     s.save(p)
     s3 = _Settings.load(p)
-    check("modified values", s3.wait_after_click == 2.3 and s3.experimental is True
-          and s3.mute is True)
+    check("modified values", s3.wait_after_click == 2.3 and s3.pause_before_retry == 0.5
+          and s3.experimental is True and s3.mute is True)
 
     # Bool stored as JSON true/false -> loads back as bool, not string
     check("bool type preserved", isinstance(s3.experimental, bool))
@@ -156,12 +158,12 @@ with tempfile.TemporaryDirectory() as tmp:
     # Partial JSON ? missing keys use defaults
     p.write_text(json.dumps({"wait_after_click": 1.0}), "utf-8")
     s4 = _Settings.load(p)
-    check("partial load fills defaults", s4.escape_hold == 1.5 and s4.wait_after_click == 1.0)
+    check("partial load fills defaults", s4.escape_hold == 0.1 and s4.pause_before_retry == 0.0 and s4.wait_after_click == 1.0)
 
     # Corrupt JSON -> defaults, no exception
     p.write_text("not valid json {{", "utf-8")
     s5 = _Settings.load(p)
-    check("corrupt json -> defaults", s5.wait_after_click == 0.5)
+    check("corrupt json -> defaults", s5.wait_after_click == 0.1)
 
     # Unknown extra keys -> silently ignored
     p.write_text(json.dumps({"wait_after_click": 3.0, "future_key": "value"}), "utf-8")
