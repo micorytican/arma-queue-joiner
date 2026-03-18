@@ -102,7 +102,7 @@ class _Settings:
     experimental: bool = False
     start_hotkey: str = "F6"
     stop_hotkey: str = "F4"
-    alert_wav: str = ""
+    mute: bool = False
 
     @classmethod
     def load(cls, path: Path) -> "_Settings":
@@ -144,11 +144,11 @@ with tempfile.TemporaryDirectory() as tmp:
     # Modified values
     s.wait_after_click = 2.3
     s.experimental = True
-    s.alert_wav = r"C:\sounds\alert.wav"
+    s.mute = True
     s.save(p)
     s3 = _Settings.load(p)
     check("modified values", s3.wait_after_click == 2.3 and s3.experimental is True
-          and s3.alert_wav == r"C:\sounds\alert.wav")
+          and s3.mute is True)
 
     # Bool stored as JSON true/false -> loads back as bool, not string
     check("bool type preserved", isinstance(s3.experimental, bool))
@@ -298,46 +298,31 @@ check("exception message in log",        any("Simulated crash" in m for m in log
 
 
 # ==============================================================================
-# 7. _play_alert ? WAV fallback logic
+# 7. _play_alert -- mute toggle
 # ==============================================================================
 print("\n  [_play_alert]")
 
 
 class _AlertJoiner:
-    def __init__(self, alert_wav=""):
-        self.alert_wav = alert_wav
-        self.played_wav = None
+    def __init__(self, mute=False):
+        self.mute = mute
         self.beep_count = 0
 
     def _play_alert(self):
-        if self.alert_wav and os.path.isfile(self.alert_wav):
-            try:
-                self.played_wav = self.alert_wav  # simulates winsound.PlaySound
-                return
-            except Exception:
-                pass
+        if self.mute:
+            return
         self.beep_count += 1  # simulates winsound.Beep x3
 
 
-# No wav -> beep fallback
-aj = _AlertJoiner()
+# Muted -> silent
+aj = _AlertJoiner(mute=True)
 aj._play_alert()
-check("no wav -> beep", aj.beep_count == 1 and aj.played_wav is None)
+check("muted -> no beep", aj.beep_count == 0)
 
-# Non-existent file -> beep fallback
-aj2 = _AlertJoiner(alert_wav="/nonexistent/sound.wav")
+# Unmuted -> beeps
+aj2 = _AlertJoiner(mute=False)
 aj2._play_alert()
-check("missing file -> beep fallback", aj2.beep_count == 1 and aj2.played_wav is None)
-
-# Valid file -> plays wav
-with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
-    wav_path = tf.name
-try:
-    aj3 = _AlertJoiner(alert_wav=wav_path)
-    aj3._play_alert()
-    check("existing wav -> plays wav", aj3.played_wav == wav_path and aj3.beep_count == 0)
-finally:
-    os.unlink(wav_path)
+check("unmuted -> beep", aj2.beep_count == 1)
 
 
 # ==============================================================================

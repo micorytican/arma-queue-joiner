@@ -12,7 +12,7 @@ import threading
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, ttk
+from tkinter import ttk
 
 import keyboard
 import mss
@@ -70,7 +70,7 @@ class Settings:
     experimental: bool = False
     start_hotkey: str = "F6"
     stop_hotkey: str = "F4"
-    alert_wav: str = ""
+    mute: bool = False
 
     @classmethod
     def load(cls) -> "Settings":
@@ -114,7 +114,7 @@ class QueueJoiner:
         self.wait_after_click = 0.5
         self.escape_hold = 1.5
         self.pause_before_retry = 0.3
-        self.alert_wav = ""
+        self.mute = False
         self._sct = None
 
     def _find_game_monitor(self, mx: int, my: int):
@@ -287,15 +287,8 @@ class QueueJoiner:
         self.running = False
 
     def _play_alert(self) -> None:
-        if self.alert_wav and os.path.isfile(self.alert_wav):
-            try:
-                winsound.PlaySound(
-                    self.alert_wav,
-                    winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
-                )
-                return
-            except Exception:
-                pass
+        if self.mute:
+            return
         try:
             for _ in range(3):
                 winsound.Beep(1000, 300)
@@ -306,7 +299,7 @@ class QueueJoiner:
 
 class App(tk.Tk):
     WINDOW_WIDTH  = 440
-    WINDOW_HEIGHT = 520
+    WINDOW_HEIGHT = 490
     HOTKEY_OPTIONS = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]
 
     def __init__(self):
@@ -437,15 +430,11 @@ class App(tk.Tk):
             variable=self.experimental_var, command=self._save_settings,
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=4)
 
-        # Alert sound
-        ttk.Label(sf, text="Alert sound (.wav):").grid(row=3, column=0, sticky="w", pady=3)
-        wf = ttk.Frame(sf)
-        wf.grid(row=3, column=1, padx=(10, 0), pady=3, sticky="w")
-        self.alert_wav_var = tk.StringVar(value=self.settings.alert_wav)
-        ttk.Entry(wf, textvariable=self.alert_wav_var, state="readonly", width=13).pack(side="left")
-        ttk.Button(wf, text="…", width=2, command=self._pick_alert_wav).pack(side="left", padx=(3, 0))
-        ttk.Button(wf, text="✕", width=2, command=self._clear_alert_wav).pack(side="left", padx=(2, 0))
-        self.alert_wav_var.trace_add("write", lambda *_: self.after(0, self._save_settings))
+        self.mute_var = tk.BooleanVar(value=self.settings.mute)
+        ttk.Checkbutton(
+            sf, text="Mute alert sound",
+            variable=self.mute_var, command=self._save_settings,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=4)
 
         # Status
         self.status_label = ttk.Label(self, text="Status: Idle", style="Status.TLabel")
@@ -466,23 +455,12 @@ class App(tk.Tk):
             self.settings.wait_after_click = float(self.wait_var.get())
             self.settings.escape_hold = float(self.esc_var.get())
             self.settings.experimental = bool(self.experimental_var.get())
+            self.settings.mute = bool(self.mute_var.get())
             self.settings.start_hotkey = self.start_hotkey_var.get()
             self.settings.stop_hotkey = self.stop_hotkey_var.get()
-            self.settings.alert_wav = self.alert_wav_var.get()
             self.settings.save()
         except ValueError:
             pass
-
-    def _pick_alert_wav(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Select alert sound",
-            filetypes=[("WAV files", "*.wav"), ("All files", "*.*")],
-        )
-        if path:
-            self.alert_wav_var.set(path)
-
-    def _clear_alert_wav(self) -> None:
-        self.alert_wav_var.set("")
 
     # ── Hotkeys ───────────────────────────────────────────────────────────────
 
@@ -516,7 +494,7 @@ class App(tk.Tk):
             self.joiner.wait_after_click = float(self.wait_var.get())
             self.joiner.escape_hold = float(self.esc_var.get())
             self.joiner.experimental = self.experimental_var.get()
-            self.joiner.alert_wav = self.alert_wav_var.get()
+            self.joiner.mute = self.mute_var.get()
         except ValueError:
             self._append_log("ERROR: Invalid numeric settings.")
             return
