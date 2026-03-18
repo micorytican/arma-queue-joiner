@@ -1,5 +1,5 @@
 """
-Arma Reforger Queue Joiner | by lime98
+Arma Reforger Queue Joiner | by lime98 aka micorytican
 """
 
 import ctypes
@@ -307,7 +307,7 @@ class App(tk.Tk):
         super().__init__()
         self.settings = Settings.load()
 
-        self.title("Arma Reforger Queue Joiner | by lime98")
+        self.title("AQJ")
         self.geometry(f"{self.WINDOW_WIDTH}x{self.WINDOW_HEIGHT}")
         self.resizable(False, False)
         self.configure(bg="#1e1e1e")
@@ -383,15 +383,17 @@ class App(tk.Tk):
         style.configure("TLabel",       background="#1e1e1e", foreground="#cccccc", font=("Segoe UI", 10))
         style.configure("Header.TLabel",background="#1e1e1e", foreground="#ffffff", font=("Segoe UI", 14, "bold"))
         style.configure("Status.TLabel",background="#1e1e1e", foreground="#888888", font=("Segoe UI", 10))
+        style.configure("SubHeader.TLabel", background="#1e1e1e", foreground="#666666", font=("Segoe UI", 9))
 
-        ttk.Label(self, text="Arma Reforger Queue Joiner | by lime98", style="Header.TLabel").pack(pady=(15, 8))
+        ttk.Label(self, text="Arma Reforger Queue Joiner", style="Header.TLabel").pack(pady=(15, 2))
+        ttk.Label(self, text="by lime98 aka micorytican", style="SubHeader.TLabel").pack(pady=(0, 8))
 
         ttk.Label(
             self,
             text="1. Open server browser\n"
                  "2. Hover mouse over JOIN button\n"
                  "3. Press START hotkey\n"
-                 "4. Experimental = auto mouse-click ESC (no key needed)",
+                 "4. Experimental = auto mouse-click ESC",
             style="TLabel",
             justify="left",
         ).pack(padx=20, pady=(0, 10))
