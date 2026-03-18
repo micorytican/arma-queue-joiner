@@ -15,7 +15,6 @@ import keyboard
 import mss
 import numpy as np
 import winsound
-from PIL import Image
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -52,14 +51,6 @@ def get_cursor_pos() -> tuple[int, int]:
     return pt.x, pt.y
 
 
-def find_game_monitor(mx: int, my: int):
-    with mss.mss() as sct:
-        for mon in sct.monitors[1:]:
-            if mon["left"] <= mx < mon["left"] + mon["width"] and mon["top"] <= my < mon["top"] + mon["height"]:
-                return mon
-        return sct.monitors[1]
-
-
 class QueueJoiner:
     def __init__(self, on_log, on_state_change):
         self.on_log = on_log
@@ -73,51 +64,48 @@ class QueueJoiner:
         self.wait_after_click = 0.5
         self.escape_hold = 1.5
         self.pause_before_retry = 0.3
+        self._sct = None
 
-    def read_colors(self):
-        with mss.mss() as sct:
-            shot = sct.grab(self.game_monitor)
-            img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-        w, h = img.size
-        region = img.crop((int(w * 0.28), int(h * 0.28), int(w * 0.52), int(h * 0.45)))
-        arr = np.array(region)
-        yellow = int(((arr[:, :, 0] > 180) & (arr[:, :, 1] > 130) & (arr[:, :, 2] < 80)).sum())
-        red = int(((arr[:, :, 0] > 180) & (arr[:, :, 1] < 80) & (arr[:, :, 2] < 80)).sum())
+    def _find_game_monitor(self, mx: int, my: int):
+        for mon in self._sct.monitors[1:]:
+            if mon["left"] <= mx < mon["left"] + mon["width"] and mon["top"] <= my < mon["top"] + mon["height"]:
+                return mon
+        return self._sct.monitors[1]
+
+    def _grab_region(self, left_pct: float, top_pct: float, right_pct: float, bottom_pct: float) -> np.ndarray:
+        mon = self.game_monitor
+        w, h = mon["width"], mon["height"]
+        region = {
+            "top":    mon["top"]  + int(h * top_pct),
+            "left":   mon["left"] + int(w * left_pct),
+            "width":  int(w * (right_pct - left_pct)),
+            "height": int(h * (bottom_pct - top_pct)),
+        }
+        shot = self._sct.grab(region)
+        return np.frombuffer(shot.bgra, dtype=np.uint8).reshape(shot.height, shot.width, 4)
+
+    def read_colors(self) -> tuple[int, int]:
+        arr = self._grab_region(0.28, 0.28, 0.52, 0.45)
+        r, g, b = arr[:, :, 2], arr[:, :, 1], arr[:, :, 0]
+        yellow = int(((r > 180) & (g > 130) & (b < 80)).sum())
+        red    = int(((r > 180) & (g < 80)  & (b < 80)).sum())
         return yellow, red
 
-    def is_server_full(self) -> bool:
-        _, red = self.read_colors()
-        return red > 50
-
-    def is_queue_text_visible(self) -> bool:
-        yellow, _ = self.read_colors()
-        return yellow > 1500
-
     def find_esc_position(self) -> tuple[int, int] | None:
-        with mss.mss() as sct:
-            shot = sct.grab(self.game_monitor)
-            img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-            arr = np.array(img)
+        arr = self._grab_region(0.05, 0.65, 0.45, 0.95)
+        r, g, b = arr[:, :, 2], arr[:, :, 1], arr[:, :, 0]
+        mask = (r > 200) & (g > 160) & (b < 90) & (g < 230)
 
-        h, w = arr.shape[:2]
-        roi = arr[int(h * 0.65):int(h * 0.95), int(w * 0.05):int(w * 0.45)]
-
-        mask = (
-            (roi[:, :, 0] > 200) &
-            (roi[:, :, 1] > 160) &
-            (roi[:, :, 2] < 90) &
-            (roi[:, :, 1] < 230)
-        )
-
-        if np.sum(mask) < 300:  # button is ~500-800px when visible
+        if np.sum(mask) < 300:
             return None
 
         ys, xs = np.where(mask)
         rel_x = int(xs.mean())
         rel_y = int(ys.mean())
 
-        esc_x = self.game_monitor["left"] + int(w * 0.05) + rel_x
-        esc_y = self.game_monitor["top"] + int(h * 0.65) + rel_y
+        mon = self.game_monitor
+        esc_x = mon["left"] + int(mon["width"] * 0.05) + rel_x
+        esc_y = mon["top"]  + int(mon["height"] * 0.65) + rel_y
 
         self.on_log(f"ESC button AUTO-detected at ({esc_x}, {esc_y})")
         return esc_x, esc_y
@@ -139,70 +127,78 @@ class QueueJoiner:
         self.attempt = 0
         self.mouse_x = mouse_x
         self.mouse_y = mouse_y
-        self.game_monitor = find_game_monitor(mouse_x, mouse_y)
 
-        self.on_log(f"Target server button: ({self.mouse_x}, {self.mouse_y})")
-        self.on_log(f"Experimental mouse-ESC mode: {'ENABLED' if self.experimental else 'DISABLED'}")
-        self.on_state_change("running")
+        with mss.mss() as self._sct:
+            self.game_monitor = self._find_game_monitor(mouse_x, mouse_y)
 
-        time.sleep(0.3)
+            self.on_log(f"Target server button: ({self.mouse_x}, {self.mouse_y})")
+            self.on_log(f"Experimental mouse-ESC mode: {'ENABLED' if self.experimental else 'DISABLED'}")
+            self.on_state_change("running")
 
-        while self.running:
-            self.attempt += 1
-            self.on_log(f"[{self.attempt}] Clicking server button...")
-            move_and_click(self.mouse_x, self.mouse_y)
-            time.sleep(0.2)
-            move_and_click(self.mouse_x, self.mouse_y)
-            time.sleep(self.wait_after_click)
+            time.sleep(0.3)
 
-            if not self.running:
-                break
+            while self.running:
+                self.attempt += 1
+                self.on_log(f"[{self.attempt}] Clicking server button...")
+                move_and_click(self.mouse_x, self.mouse_y)
+                time.sleep(0.2)
+                move_and_click(self.mouse_x, self.mouse_y)
+                time.sleep(self.wait_after_click)
 
-            # === SERVER FULL ===
-            if self.is_server_full():
-                self.on_log(f"[{self.attempt}] Server full → clicking ESC")
-                self.click_escape()
-                time.sleep(self.pause_before_retry)
-                continue
-
-            self.on_log(f"[{self.attempt}] Waiting 8s for connect/queue screen...")
-            still_there = True
-            for i in range(8):
                 if not self.running:
                     break
-                time.sleep(1.0)
-                if self.is_server_full():
-                    self.on_log(f"[{self.attempt}] Server full after {i+1}s → ESC")
-                    still_there = False
+
+                yellow, red = self.read_colors()
+
+                # === SERVER FULL ===
+                if red > 50:
+                    self.on_log(f"[{self.attempt}] Server full → clicking ESC")
                     self.click_escape()
                     time.sleep(self.pause_before_retry)
-                    break
+                    continue
 
-            if not self.running or not still_there:
-                continue
-
-            # === QUEUE CHECK ===
-            if self.is_queue_text_visible():
-                confirmed = True
-                for i in range(3):
-                    time.sleep(1.0)
-                    if not self.is_queue_text_visible():
-                        confirmed = False
+                self.on_log(f"[{self.attempt}] Waiting 8s for connect/queue screen...")
+                still_there = True
+                for i in range(8):
+                    if not self.running:
                         break
-                if confirmed:
-                    self.on_log(f"[{self.attempt}] CONFIRMED — IN QUEUE!")
-                    self.on_state_change("success")
-                    self.running = False
-                    self._play_alert()
-                    return
-                else:
-                    self.on_log(f"[{self.attempt}] Queue lost → ESC")
-                    self.click_escape()
-                    time.sleep(self.pause_before_retry)
-            else:
-                self.on_log(f"[{self.attempt}] Connect screen passed → retrying")
-                time.sleep(self.pause_before_retry)
+                    time.sleep(1.0)
+                    _, red = self.read_colors()
+                    if red > 50:
+                        self.on_log(f"[{self.attempt}] Server full after {i+1}s → ESC")
+                        still_there = False
+                        self.click_escape()
+                        time.sleep(self.pause_before_retry)
+                        break
 
+                if not self.running or not still_there:
+                    continue
+
+                # === QUEUE CHECK ===
+                yellow, _ = self.read_colors()
+                if yellow > 1500:
+                    confirmed = True
+                    for i in range(3):
+                        time.sleep(1.0)
+                        yellow, _ = self.read_colors()
+                        if yellow <= 1500:
+                            confirmed = False
+                            break
+                    if confirmed:
+                        self.on_log(f"[{self.attempt}] CONFIRMED — IN QUEUE!")
+                        self.on_state_change("success")
+                        self.running = False
+                        self._play_alert()
+                        return
+                    else:
+                        self.on_log(f"[{self.attempt}] Queue lost → ESC")
+                        self.click_escape()
+                        time.sleep(self.pause_before_retry)
+                else:
+                    self.on_log(f"[{self.attempt}] Connect screen passed → retrying")
+                    time.sleep(self.pause_before_retry)
+
+        self._sct = None
         self.on_log("Stopped.")
         self.on_state_change("idle")
 
