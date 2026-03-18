@@ -38,8 +38,6 @@ pyinstaller ^
     --hidden-import=numpy ^
     --hidden-import=numpy.core ^
     --hidden-import=numpy.lib ^
-    --hidden-import=PIL ^
-    --hidden-import=PIL.Image ^
     --hidden-import=tkinter ^
     --hidden-import=tkinter.ttk ^
     --hidden-import=keyboard ^
