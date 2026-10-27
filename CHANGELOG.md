@@ -33,10 +33,22 @@ A full rewrite. Settings from 1.x are carried over.
 
 - Rare crashes caused by updating the window from the background thread.
 
-## [1.1.0]
+## [1.3.0] - 2026-03-18
+
+- System tray, saved settings, crash watchdog, elapsed timer.
+- Adaptive wait: reacts as soon as the "server full" dialog appears.
+- Faster screen capture (only the needed regions, no Pillow).
+- Faster retries by default; "Pause after ESC" setting; mute toggle for the alert.
+
+## [1.2.0] - 2026-03-16
+
+- Fixed the minimum wait time and the build.
+- Code clean-up, new README with a demo GIF.
+
+## [1.1.0] - 2026-02-24
 
 - Experimental fast ESC mode, speed improvements.
 
-## [1.0.0]
+## [1.0.0] - 2026-02-09
 
 - First release: clicks Join until you are in the queue, F6 / F4 hotkeys.
