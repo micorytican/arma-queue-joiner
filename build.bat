@@ -1,81 +1,60 @@
 @echo off
-setlocal EnableDelayedExpansion
-
+rem Build Arma Queue Joiner.
+rem   build.bat         portable dist\ArmaQueueJoiner.exe
+rem   build.bat all     portable exe + installer (needs Inno Setup 6)
+rem Set DIST to build somewhere else, e.g. while the app is running from dist.
+setlocal
 cd /d "%~dp0"
+if "%DIST%"=="" set "DIST=dist"
 
 echo.
-echo ======================================================
-echo   Arma Reforger Queue Joiner - Build Script
-echo ======================================================
-echo.
+echo  Arma Queue Joiner - build
+echo  -------------------------
 
-echo [1/5] Cleaning old folders...
-if exist build rmdir /s /q build >nul 2>&1
-if exist dist  rmdir /s /q dist  >nul 2>&1
-if exist *.spec del /q *.spec >nul 2>&1
-
-echo [2/5] Updating pip and installing dependencies...
-python -m pip install --upgrade pip --quiet
-pip install -r requirements.txt --quiet
-if %errorlevel% neq 0 (
-    echo.
-    echo ERROR: Failed to install dependencies.
-    pause
-    exit /b 1
+if not exist .venv\Scripts\python.exe (
+    echo  Creating virtual environment in .venv ...
+    py -3.13 -m venv .venv 2>nul || python -m venv .venv || goto :fail
 )
+set "PY=.venv\Scripts\python.exe"
 
-echo [3/5] Installing / upgrading PyInstaller...
-pip install pyinstaller --upgrade --quiet
+echo  Installing dependencies into .venv ...
+%PY% -m pip install --upgrade pip --quiet || goto :fail
+%PY% -m pip install -r requirements-dev.txt --quiet || goto :fail
 
-echo [4/5] Building executable...
-pyinstaller ^
-    --onefile ^
-    --noconsole ^
-    --name "ArmaQueueJoiner" ^
-    --icon=icon.ico ^
-    --add-data "icon.ico;." ^
-    --hidden-import=mss ^
-    --hidden-import=numpy ^
-    --hidden-import=numpy.core ^
-    --hidden-import=numpy.lib ^
-    --hidden-import=pystray ^
-    --hidden-import=pystray._util ^
-    --hidden-import=pystray.backends.win32 ^
-    --hidden-import=PIL ^
-    --hidden-import=PIL.Image ^
-    --hidden-import=PIL.BmpImagePlugin ^
-    --hidden-import=PIL.IcoImagePlugin ^
-    --hidden-import=tkinter ^
-    --hidden-import=tkinter.ttk ^
-    --hidden-import=keyboard ^
-    --hidden-import=winsound ^
-    --hidden-import=pkg_resources ^
-    --exclude-module=numpy.f2py ^
-    --exclude-module=numpy.distutils ^
-    --exclude-module=numpy.testing ^
-    --exclude-module=numpy._core.tests ^
-    --clean ^
-    app.py
+echo  Checking code ...
+%PY% -m ruff check . || goto :fail
+%PY% -m pytest -q || goto :fail
 
-if %errorlevel% neq 0 (
-    echo.
-    echo ERROR: PyInstaller failed.
-    pause
-    exit /b 1
+for /f %%v in ('%PY% -c "import aqj; print(aqj.__version__)"') do set "VERSION=%%v"
+echo  Version %VERSION%
+%PY% tools\version_info.py build\version_info.txt >nul || goto :fail
+
+set PYI_ARGS=--noconfirm --clean --windowed --icon icon.ico --version-file build\version_info.txt ^
+ --add-data "icon.ico;." --exclude-module tkinter --exclude-module unittest --exclude-module pydoc ^
+ --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick --exclude-module PySide6.QtPdf ^
+ --exclude-module PySide6.QtOpenGL --distpath "%DIST%"
+
+echo  Building portable exe ...
+%PY% -m PyInstaller %PYI_ARGS% --onefile --name ArmaQueueJoiner --workpath build\onefile app.py || goto :fail
+
+if /i not "%1"=="all" goto :done
+
+echo  Building installer ...
+%PY% -m PyInstaller %PYI_ARGS% --onedir --name ArmaQueueJoiner --workpath build\onedir app.py || goto :fail
+set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not exist "%ISCC%" (
+    echo  Inno Setup 6 not found. Install it from https://jrsoftware.org/isinfo.php
+    goto :fail
 )
+"%ISCC%" /Q /DAppVersion=%VERSION% installer\ArmaQueueJoiner.iss || goto :fail
 
+:done
 echo.
-echo ======================================================
-echo Build finished!
-echo.
-echo Executable:   dist\ArmaQueueJoiner.exe
-echo.
-echo To test (console will stay open):
-echo   cd dist
-echo   ArmaQueueJoiner.exe
-echo.
-echo If it works → change --console to --windowed and rebuild
-echo ======================================================
-echo.
+echo  Done. Output is in %DIST%\
+exit /b 0
 
-pause
+:fail
+echo.
+echo  Build failed.
+exit /b 1
