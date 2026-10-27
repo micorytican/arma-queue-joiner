@@ -1,84 +1,101 @@
 # Arma Reforger Queue Joiner
 
-Keeps pressing **Join** on a full Arma Reforger server until you get into the queue, then tells you: a sound, a Windows notification and, if you want, a push to your phone.
+Keeps pressing **Join** on a full Arma Reforger server until you get into the queue, then tells you with a sound, a Windows notification and, if you like, a push to your phone or a Discord message.
 
-![Python](https://img.shields.io/badge/Python-3.13-blue)
+[![CI](https://github.com/micorytican/arma-queue-joiner/actions/workflows/ci.yml/badge.svg)](https://github.com/micorytican/arma-queue-joiner/actions/workflows/ci.yml)
+![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011-lightgrey)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-lightgrey)
 
 <p>
-  <img src="assets/screenshot-main.png" width="320" alt="Main screen while joining">
-  <img src="assets/screenshot-settings.png" width="320" alt="Settings">
+  <img src="assets/screenshot-main.png" width="360" alt="Main page after getting into the queue, dark theme">
+  <img src="assets/screenshot-settings.png" width="360" alt="Settings page in Ukrainian, light theme">
 </p>
 
 ## Download
 
-Grab `ArmaQueueJoiner.exe` from the [Releases](https://github.com/micorytican/arma-queue-joiner/releases) page. No install needed.
+From the [Releases](https://github.com/micorytican/arma-queue-joiner/releases) page:
+
+- **ArmaQueueJoiner-x.y.z-setup.exe** installs for your user only (no admin rights) and adds a Start menu entry. Starts faster.
+- **ArmaQueueJoiner.exe** is portable. Put it anywhere and run it.
+
+Windows SmartScreen may warn that the publisher is unknown, because the app is not code-signed. Choose *More info › Run anyway*.
 
 ## How to use
 
-1. Open the server browser in Arma Reforger and pick a full server.
-2. Hover your mouse over the **Join** button.
-3. Press **F6** (or click **Start** in the app and move the mouse to Join within 3 seconds).
+1. In Arma Reforger, open the server browser and pick a full server.
+2. Hover the mouse over **Join**.
+3. Press **F6**, or click **Start** in the app and move the mouse to Join within 3 seconds.
 4. Leave the mouse alone. The app clicks Join, closes the "server full" dialog and tries again.
-5. When you are in the queue it stops and alerts you.
+5. When you are in the queue it stops and alerts you. Keep the game open.
 
-Press **F4** at any time to stop. Moving the mouse also stops it, so you can always take back control.
+Press **F4** to stop at any time. Moving the mouse also stops it, so you can always take back control.
 
-## What's new in 2.0
+## Features
 
-- **New interface** in the style of Windows 11. It follows your light or dark mode and your Windows accent colour. Status, time and attempts up front, settings on their own page.
-- **Safer.** Clicks only while Arma Reforger is the active window, and stops as soon as you move the mouse.
-- **Phone notifications** through the free [ntfy](https://ntfy.sh) app, no account needed.
-- **Works the same at any resolution.** Detection thresholds now scale with the screen, not fixed pixel counts.
-- **Faster reaction.** The queue screen is detected as soon as it appears instead of after a fixed 8 second wait.
-- **No admin rights needed for hotkeys,** and holding a key no longer triggers it twice.
-- **Start button with countdown** for people who prefer not to use hotkeys.
-- Only one copy can run at a time; opening it again brings the window back.
-- Your 1.x settings are carried over.
+- **Looks and feels like Windows 11.** Follows your light or dark mode and your accent colour.
+- **English and Ukrainian.** Picks your Windows language; change it in Settings.
+- **Safe by default.** Clicks only while Arma Reforger is the active window and stops when you move the mouse.
+- **Alerts:** sound, Windows notification, phone push through the free [ntfy](https://ntfy.sh) app, Discord message through a webhook.
+- **Diagnostics page** shows what the app sees on screen right now, so you can tell why it does or does not react.
+- **Any resolution.** Detection scales with the screen size.
+- **Update check** against GitHub Releases at startup (can be turned off).
 
 ## Settings
 
 | Setting | Default | What it does |
 |---|---|---|
-| Start / Stop hotkey | F6 / F4 | Start saves the mouse position at that moment |
-| Only click inside Arma Reforger | On | Pauses while another window is active |
-| Stop when I move the mouse | On | Lets you take over instantly |
-| Fast close | Off | Clicks the on-screen ESC button instead of pressing the key; falls back to the key if the button is not found |
-| Wait after click | 0.10 s | Extra time to wait for a dialog after clicking Join |
-| Give up on a try after | 8.00 s | If neither "server full" nor the queue appears, click Join again |
-| Pause before retry | 0.00 s | Breather between attempts |
-| Hold ESC key for | 0.10 s | How long the ESC key is held |
-| Sound alert | On | Three short beeps when you are in |
-| Notify my phone | Off | Push through ntfy; see below |
-| Keep on top / Close to tray | Off / On | Window behaviour |
+| Start / Stop hotkey | F6 / F4 | Start uses the mouse position at that moment |
+| Only click inside Arma Reforger | On | Pauses while another window is in front |
+| Stop when I move the mouse | On | Lets you take over at once |
+| Fast close | Off | Clicks the on-screen ESC button instead of pressing the key; falls back to the key |
+| Timing | 0.10 / 8.00 / 0.00 / 0.10 s | Wait after clicking Join, retry if nothing happens after, pause between attempts, ESC hold |
+| Play a sound | On | Three short beeps |
+| Notify my phone | Off | Push through ntfy, see below |
+| Post to Discord | Off | Message to a channel through a webhook, see below |
+| Language | Same as Windows | English or Ukrainian |
+| Keep on top / Close to the tray | Off / On | Window behaviour |
+| Check for updates | On | One request to GitHub at startup, nothing else is sent |
 
-Settings are stored in `%APPDATA%\ArmaQueueJoiner\settings.json`.
+Settings live in `%APPDATA%\ArmaQueueJoiner\settings.json`. Settings from 1.x are carried over.
 
-### Phone notifications
+### Phone notifications (ntfy)
 
 1. Install **ntfy** on your phone (Android or iOS).
-2. In the app turn on **Notify my phone**. A random topic name is filled in for you.
-3. In ntfy subscribe to the same topic and press **Send test**.
+2. Turn on **Notify my phone**. A random topic name is filled in.
+3. Subscribe to that topic in ntfy and press **Send test**.
 
 Anyone who knows the topic name can read its messages, so keep it hard to guess.
 
-## How it works
+### Discord
 
-The app looks at two small areas of the screen:
-
-- the centre-left dialog area: red means "server full", yellow text means you are in the queue (it must stay for 3 seconds to count);
-- the bottom-left area, only for Fast close, to find the ESC button.
-
-It never reads game memory or network traffic. It only sees the screen and moves the mouse, like you would.
+1. In Discord open the channel settings › **Integrations** › **Webhooks** › **New webhook** › **Copy webhook URL**.
+2. Turn on **Post to Discord**, paste the link and press **Send test**.
 
 ## Troubleshooting
 
-- **Nothing happens / input is blocked:** if Arma Reforger runs as administrator, run the app as administrator too. Windows does not let a normal app send input to an elevated one.
-- **A hotkey does not work:** another program already uses it. Pick a different key in Settings.
-- **It keeps saying "waiting for the Arma Reforger window":** the game window is not in front. Click into the game, or turn off *Only click inside Arma Reforger*.
+Open **Settings › Diagnostics**. It shows the active window, your display, how much "server full" red and queue yellow the app sees, and a picture of the scanned area.
 
-## Run from source
+| Problem | What to do |
+|---|---|
+| Status stays on *Waiting for the Arma Reforger window* | Click into the game. If Diagnostics says *Not Arma Reforger* while the game is in front, turn off *Only click inside Arma Reforger* and report it. |
+| Nothing is clicked | If Arma Reforger runs as administrator, run the app as administrator too. Windows blocks input from normal apps to elevated ones. |
+| A hotkey does not work | Another program uses it. Settings shows a message; pick a different key. |
+| It never detects the queue or the full dialog | Open the dialog in game, check the values on the Diagnostics page and include **Copy report** in a bug report. |
+
+**Reporting a bug:** open an [issue](https://github.com/micorytican/arma-queue-joiner/issues), paste the Diagnostics report (it leaves out your ntfy topic and Discord link) and attach the newest `aqj.log` from **Diagnostics › Open log folder**.
+
+## How it works
+
+The app looks at two small parts of the screen and never reads game memory or network traffic:
+
+- the centre-left dialog area: red means "server full"; yellow text that stays for 3 seconds means you are in the queue;
+- the bottom-left area, only for Fast close, to find the ESC button.
+
+It moves the mouse and presses keys the same way you would.
+
+## For developers
+
+Requirements: Windows 10 or 11, Python 3.13.
 
 ```bash
 git clone https://github.com/micorytican/arma-queue-joiner.git
@@ -88,21 +105,43 @@ py -3.13 -m venv .venv
 .venv\Scripts\python app.py
 ```
 
-Run the tests with `.venv\Scripts\python -m pytest`. Build the `.exe` with `build.bat` (it creates the venv, runs the tests and calls PyInstaller).
+Everything installs into `.venv` inside the project.
+
+| Task | Command |
+|---|---|
+| Run tests | `.venv\Scripts\python -m pytest` |
+| Lint and format | `.venv\Scripts\ruff check .` and `.venv\Scripts\ruff format .` |
+| Type check | `.venv\Scripts\basedpyright` |
+| Portable exe | `build.bat` |
+| Portable exe and installer | `build.bat all` (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)) |
+
+See [docs/TESTING.md](docs/TESTING.md) for the test layers and the manual in-game checklist.
+
+### Releasing
+
+1. Bump `__version__` in `aqj/__init__.py` and add a section to `CHANGELOG.md`.
+2. Commit, then tag and push: `git tag v2.0.1 && git push origin v2.0.1`.
+3. The *Release* workflow runs the checks, builds both executables and publishes the GitHub release with the changelog section as notes.
 
 ### Project layout
 
 ```
 aqj/
-  joiner.py     the join loop (pure logic, tested with fakes)
-  detection.py  pixel analysis
-  screen.py     screen capture (mss)
-  winapi.py     mouse, keyboard and window calls
-  hotkeys.py    global hotkeys via RegisterHotKey
-  notify.py     sound and ntfy push
-  settings.py   load, validate and save settings
-  ui/           PySide6 window, widgets and theme
-tests/          pytest suite
+  joiner.py      the join loop (pure logic, tested with fakes)
+  detection.py   pixel analysis
+  screen.py      screen capture (mss)
+  winapi.py      mouse, keyboard and window calls
+  hotkeys.py     global hotkeys via RegisterHotKey
+  notify.py      sound, ntfy and Discord
+  updates.py     GitHub release check
+  net.py         small HTTP helper
+  logs.py        log file and crash handler
+  i18n.py        English and Ukrainian text
+  settings.py    load, validate and save settings
+  ui/            window, Fluent-style widgets and theme
+tests/           pytest and pytest-qt suites
+tools/           build helpers (version resource, release notes)
+installer/       Inno Setup script
 ```
 
 ## License

@@ -91,6 +91,7 @@ def test_retries_until_queue_then_succeeds():
     assert rec.attempts == [1, 2, 3]
     assert len(inputs.clicks) == 6  # double click per attempt
     assert rec.states[-1][0] is State.SUCCESS
+    assert rec.states[-1][1].params == {"n": 3}
 
 
 def test_queue_that_disappears_is_closed_and_retried():
@@ -99,7 +100,7 @@ def test_queue_that_disappears_is_closed_and_retried():
     joiner, rec = make(vision, inputs)
     assert joiner.run((500, 400), FAST) is State.SUCCESS
     assert inputs.escapes == 1
-    assert any("disappeared" in m for m in rec.logs)
+    assert any(m.key == "log.queue_lost" for m in rec.logs)
 
 
 def test_fast_esc_clicks_button_when_found():
@@ -119,7 +120,7 @@ def test_fast_esc_falls_back_to_key():
     cfg = JoinerConfig(**{**FAST.__dict__, "fast_esc": True})
     joiner.run((500, 400), cfg)
     assert inputs.escapes == 1
-    assert any("not found" in m for m in rec.logs)
+    assert any(m.key == "log.esc_not_found" for m in rec.logs)
 
 
 def test_moving_the_mouse_stops():
@@ -128,7 +129,7 @@ def test_moving_the_mouse_stops():
     joiner, rec = make(FakeVision([FULL]), inputs)
     assert joiner.run((500, 400), FAST) is State.IDLE
     assert inputs.clicks == []
-    assert "mouse" in rec.states[-1][1]
+    assert rec.states[-1][1].key == "state.stopped_mouse"
 
 
 def test_waits_while_game_not_focused():
@@ -162,7 +163,8 @@ def test_crash_is_reported_as_error():
 
     joiner, rec = make(Boom([EMPTY]))
     assert joiner.run((500, 400), FAST) is State.ERROR
-    assert rec.states[-1] == (State.ERROR, "capture failed")
+    assert rec.states[-1][0] is State.ERROR
+    assert rec.states[-1][1].params == {"error": "capture failed"}
 
 
 def test_cannot_start_twice():
@@ -194,3 +196,27 @@ def test_thread_safety_smoke():
         joiner.join(2)
     assert not joiner.running
     assert threading.active_count() < 10
+
+
+def test_returning_with_the_mouse_resumes_instead_of_stopping():
+    guard = FakeGuard(focused=False)
+    inputs = FakeInputs()
+    joiner, rec = make(FakeVision([QUEUE]), inputs, guard)
+    joiner.start((500, 400), FAST)
+    time.sleep(0.2)
+    inputs.cursor = (5, 5)  # user clicked another window, then clicks back into the game
+    guard.focused = True
+    joiner.join(3)
+    assert rec.states[-1][0] is State.SUCCESS
+
+
+def test_blocked_input_is_explained():
+    from aqj.joiner import InputBlockedError
+
+    class Blocked(FakeInputs):
+        def click(self, x, y):
+            raise InputBlockedError("blocked")
+
+    joiner, rec = make(FakeVision([EMPTY]), Blocked())
+    assert joiner.run((500, 400), FAST) is State.ERROR
+    assert rec.states[-1][1].key == "state.input_blocked"

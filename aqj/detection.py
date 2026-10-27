@@ -41,15 +41,15 @@ DIALOG_REGION = Region(0.28, 0.28, 0.52, 0.45)
 ESC_REGION = Region(0.05, 0.65, 0.45, 0.95)
 
 _DIALOG_AREA_1080P = 460 * 183
-RED_FULL_RATIO = 50 / _DIALOG_AREA_1080P          # ~0.06 % of the area
-YELLOW_QUEUE_RATIO = 1500 / _DIALOG_AREA_1080P    # ~1.8 % of the area
-ESC_BUTTON_RATIO = 300 / (768 * 324)              # ~0.12 % of the area
+RED_FULL_RATIO = 50 / _DIALOG_AREA_1080P  # ~0.06 % of the area
+YELLOW_QUEUE_RATIO = 1500 / _DIALOG_AREA_1080P  # ~1.8 % of the area
+ESC_BUTTON_RATIO = 300 / (768 * 324)  # ~0.12 % of the area
 
 
 @dataclass(frozen=True)
 class DialogReading:
     yellow: float  # share of pixels that look like queue text
-    red: float     # share of pixels that look like the "server full" dialog
+    red: float  # share of pixels that look like the "server full" dialog
 
     @property
     def server_full(self) -> bool:

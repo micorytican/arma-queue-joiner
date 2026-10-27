@@ -10,6 +10,7 @@ from pathlib import Path
 from . import APP_ID
 
 HOTKEYS = [f"F{i}" for i in range(1, 13)]
+LANGUAGES = ("system", "en", "uk")
 
 # name: (minimum, maximum) for every number the user can type in
 LIMITS: dict[str, tuple[float, float]] = {
@@ -43,8 +44,13 @@ class Settings:
     phone_notify: bool = False
     ntfy_topic: str = ""
 
+    discord_notify: bool = False
+    discord_webhook: str = ""
+
     always_on_top: bool = False
     close_to_tray: bool = True
+    check_updates: bool = True
+    language: str = "system"  # "system", "en" or "uk"
 
     def normalized(self) -> Settings:
         """Return a copy with every value forced into a valid range."""
@@ -57,6 +63,9 @@ class Settings:
             s.stop_hotkey = "F4"
         if s.start_hotkey == s.stop_hotkey:
             s.stop_hotkey = next(k for k in ("F4", "F7", "F8") if k != s.start_hotkey)
+        s.discord_webhook = s.discord_webhook.strip()[:300]
+        if s.language not in LANGUAGES:
+            s.language = "system"
         s.ntfy_topic = "".join(ch for ch in s.ntfy_topic.strip() if ch.isalnum() or ch in "-_")[:64]
         return s
 

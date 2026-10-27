@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import ctypes
 import threading
-from ctypes import wintypes
 from collections.abc import Callable
+from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -24,7 +24,13 @@ user32.RegisterHotKey.restype = wintypes.BOOL
 user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
 user32.GetMessageW.restype = ctypes.c_int
-user32.PeekMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT, wintypes.UINT]
+user32.PeekMessageW.argtypes = [
+    ctypes.POINTER(wintypes.MSG),
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.UINT,
+    wintypes.UINT,
+]
 user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.PostThreadMessageW.restype = wintypes.BOOL
 
@@ -40,6 +46,7 @@ class HotkeyListener(threading.Thread):
     """Owns a Win32 message loop; hotkeys belong to the thread that registered them."""
 
     def __init__(self, on_hotkey: Callable[[str], None], on_error: Callable[[str], None]):
+        """on_error receives the key name that could not be registered."""
         super().__init__(name="hotkeys", daemon=True)
         self._on_hotkey = on_hotkey
         self._on_error = on_error
@@ -53,7 +60,8 @@ class HotkeyListener(threading.Thread):
         """bindings: action -> key name, e.g. {'start': 'F6', 'stop': 'F4'}."""
         with self._lock:
             self._pending = dict(bindings)
-        if self._ready.wait(2.0):
+        # Before the thread is ready, run() applies the pending bindings itself.
+        if self._ready.is_set():
             user32.PostThreadMessageW(self._thread_id, WM_APP_REBIND, 0, 0)
 
     def shutdown(self) -> None:
@@ -68,7 +76,7 @@ class HotkeyListener(threading.Thread):
             bindings = dict(self._pending)
         for index, (action, key) in enumerate(sorted(bindings.items()), start=1):
             if not user32.RegisterHotKey(None, index, MOD_NOREPEAT, vk_for(key)):
-                self._on_error(f"{key} is already used by another program. Pick a different key.")
+                self._on_error(key)
                 continue
             self._active[index] = action
 

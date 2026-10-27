@@ -22,12 +22,12 @@ class Glyph:
 
     SETTINGS = ""
     BACK = ""
-    READY = ""       # play
+    READY = ""  # play
     SYNC = ""
     PAUSE = ""
-    DONE = ""        # completed
+    DONE = ""  # completed
     ERROR = ""
-    TIMER = ""       # stopwatch
+    TIMER = ""  # stopwatch
     KEYBOARD = ""
     GAME = ""
     MOUSE = ""
@@ -39,8 +39,13 @@ class Glyph:
     INFO = ""
     CHEVRON_DOWN = ""
     CHEVRON_UP = ""
-    LINK = ""        # open in new window
+    LINK = ""  # open in new window
     HISTORY = ""
+    CHAT = ""  # message
+    LANGUAGE = ""  # globe
+    UPDATE = ""  # update restore
+    DIAGNOSTIC = ""
+    WARNING = ""
 
 
 @dataclass(frozen=True)
@@ -67,7 +72,7 @@ def is_dark() -> bool:
 
 
 def colors() -> Colors:
-    accent = QGuiApplication.palette().color(QPalette.Accent)
+    accent = QGuiApplication.palette().color(QPalette.ColorRole.Accent)
     if is_dark():
         return Colors(
             dark=True,
@@ -95,7 +100,7 @@ def colors() -> Colors:
         divider=QColor("#eaeaea"),
         text=QColor("#1b1b1b"),
         text_secondary=QColor("#5d5d5d"),
-        text_tertiary=QColor("#8a8a8a"),
+        text_tertiary=QColor("#6b6b6b"),  # 4.8:1 on the page, WCAG AA
         accent=accent,
         on_accent=QColor("#ffffff"),
         success=QColor("#0f7b0f"),
@@ -105,7 +110,7 @@ def colors() -> Colors:
     )
 
 
-def font(size: int, weight: QFont.Weight = QFont.Normal, display: bool = False) -> QFont:
+def font(size: int, weight: QFont.Weight = QFont.Weight.Normal, display: bool = False) -> QFont:
     f = QFont(DISPLAY_FONT if display else TEXT_FONT)
     f.setPixelSize(size)
     f.setWeight(weight)
@@ -146,6 +151,7 @@ def stylesheet(c: Colors) -> str:
         color: {c.text.name()};
     }}
     QToolButton[flat="true"]:hover {{ background: {c.card_hover.name()}; }}
+    QLabel#preview {{ border: 1px solid {c.stroke.name()}; border-radius: 4px; }}
     QPlainTextEdit#activity {{
         background: transparent; border: none;
         color: {c.text.name()};

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import sys
 from pathlib import Path
@@ -31,10 +32,9 @@ def _already_running() -> bool:
 
 
 def main() -> int:
-    try:  # own taskbar group and icon instead of python.exe's
+    # Own taskbar group and icon instead of python.exe's
+    with contextlib.suppress(AttributeError, OSError):
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"lime98.{APP_ID}")
-    except (AttributeError, OSError):
-        pass
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
@@ -42,19 +42,27 @@ def main() -> int:
     if _already_running():
         return 0
 
+    from . import logs
     from .ui import theme
     from .ui.window import MainWindow
 
-    if "windows11" in QStyleFactory.keys():
+    with contextlib.suppress(OSError):  # a read-only profile must not stop the app
+        logs.setup_logging()
+    logs.install_crash_handler()
+
+    if "windows11" in QStyleFactory.keys():  # noqa: SIM118 (keys() is a static Qt call)
         app.setStyle("windows11")
     app.setFont(theme.font(14))
 
     icon = QIcon(resource("icon.ico"))
     window = MainWindow(icon)
+    logs.install_crash_handler(window.bridge.crash.emit)
+    window.check_for_updates()
 
     server = QLocalServer(app)
     QLocalServer.removeServer(APP_ID)
     if server.listen(APP_ID):
+
         def _on_connection() -> None:
             conn = server.nextPendingConnection()
             if conn is not None:

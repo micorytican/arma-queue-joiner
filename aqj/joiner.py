@@ -1,7 +1,9 @@
-"""The join loop: click JOIN, read the result, close the dialog, repeat.
+"""The join loop: click Join, read the result, close the dialog, repeat.
 
 The loop talks to the outside world only through small interfaces (Vision,
-Inputs, FocusGuard, Listener), so it can be tested without a game.
+Inputs, FocusGuard, Listener), so it can be tested without a game. It reports
+progress as message keys plus parameters; the UI turns them into text in the
+user's language.
 """
 
 from __future__ import annotations
@@ -10,18 +12,22 @@ import enum
 import math
 import threading
 import time
-from contextlib import AbstractContextManager
-from dataclasses import dataclass
-from typing import Protocol
 from collections.abc import Callable
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from .detection import DialogReading
+
+
+class InputBlockedError(OSError):
+    """Windows refused to send input (the game runs with higher rights)."""
 
 
 class State(enum.Enum):
     IDLE = "idle"
     RUNNING = "running"
-    PAUSED = "paused"      # waiting for the game window to be active again
+    PAUSED = "paused"  # waiting for the game window to be active again
     SUCCESS = "success"
     ERROR = "error"
 
@@ -31,6 +37,18 @@ class Outcome(enum.Enum):
     QUEUE = "queue"
     NOTHING = "nothing"
     STOPPED = "stopped"
+
+
+@dataclass(frozen=True)
+class Message:
+    """A translatable message: an i18n key and its parameters."""
+
+    key: str
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+def msg(key: str, **params: Any) -> Message:
+    return Message(key, params)
 
 
 class Vision(Protocol):
@@ -51,9 +69,9 @@ class FocusGuard(Protocol):
 class Listener(Protocol):
     """Called from the worker thread. Implementations must be thread-safe."""
 
-    def on_state(self, state: State, detail: str) -> None: ...
+    def on_state(self, state: State, detail: Message) -> None: ...
     def on_attempt(self, attempt: int) -> None: ...
-    def on_log(self, message: str) -> None: ...
+    def on_log(self, message: Message) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -123,32 +141,36 @@ class Joiner:
     def run(self, target: tuple[int, int], cfg: JoinerConfig) -> State:
         """Run the loop on the calling thread and return the final state."""
         self.attempt = 0
-        final = State.IDLE
-        detail = "Stopped"
         try:
             with self._vision_factory(*target) as vision:
                 final, detail = self._loop(vision, target, cfg)
+        except InputBlockedError:
+            final, detail = State.ERROR, msg("state.input_blocked")
+            self._listener.on_log(msg("log.error", error="SendInput blocked"))
         except Exception as exc:  # report every crash instead of dying silently
-            final, detail = State.ERROR, str(exc) or exc.__class__.__name__
-            self._listener.on_log(f"Error: {detail}")
+            error = str(exc) or exc.__class__.__name__
+            final, detail = State.ERROR, msg("state.error", error=error)
+            self._listener.on_log(msg("log.error", error=error))
         self._listener.on_state(final, detail)
         return final
 
-    def _loop(self, vision: Vision, target: tuple[int, int], cfg: JoinerConfig) -> tuple[State, str]:
-        self._listener.on_log(f"Join button at {target[0]}, {target[1]}")
-        self._listener.on_state(State.RUNNING, "Starting")
+    def _loop(self, vision: Vision, target: tuple[int, int], cfg: JoinerConfig) -> tuple[State, Message]:
+        stopped = msg("state.stopped")
+        self._listener.on_log(msg("log.target", x=target[0], y=target[1]))
+        self._listener.on_state(State.RUNNING, msg("state.starting"))
         self._expected_cursor = target
         if self._wait(cfg.start_delay):
-            return State.IDLE, "Stopped"
+            return State.IDLE, stopped
 
         while not self._stop.is_set():
             blocked = self._wait_until_ready(cfg)
-            if blocked:
+            if blocked is not None:
                 return State.IDLE, blocked
 
             self.attempt += 1
-            self._listener.on_attempt(self.attempt)
-            self._listener.on_state(State.RUNNING, "Clicking Join")
+            n = self.attempt
+            self._listener.on_attempt(n)
+            self._listener.on_state(State.RUNNING, msg("state.clicking"))
             self._inputs.click(*target)
             if self._wait(cfg.double_click_gap):
                 break
@@ -160,25 +182,25 @@ class Joiner:
                 break
 
             if outcome is Outcome.SERVER_FULL:
-                self._listener.on_log(f"#{self.attempt} Server full, closing dialog")
-                self._listener.on_state(State.RUNNING, "Server full, retrying")
+                self._listener.on_log(msg("log.server_full", n=n))
+                self._listener.on_state(State.RUNNING, msg("state.server_full"))
                 self._close_dialog(vision, cfg)
             elif outcome is Outcome.QUEUE:
-                self._listener.on_state(State.RUNNING, "Queue screen found, confirming")
+                self._listener.on_state(State.RUNNING, msg("state.confirming"))
                 if self._confirm_queue(vision, cfg):
-                    self._listener.on_log(f"#{self.attempt} In queue")
-                    return State.SUCCESS, f"Got in after {self.attempt} attempt" + ("" if self.attempt == 1 else "s")
+                    self._listener.on_log(msg("log.in_queue", n=n))
+                    return State.SUCCESS, msg("state.success", n=n)
                 if self._stop.is_set():
                     break
-                self._listener.on_log(f"#{self.attempt} Queue screen disappeared, closing")
+                self._listener.on_log(msg("log.queue_lost", n=n))
                 self._close_dialog(vision, cfg)
             else:
-                self._listener.on_log(f"#{self.attempt} No dialog appeared, retrying")
+                self._listener.on_log(msg("log.no_dialog", n=n))
 
             if self._wait(cfg.pause_before_retry):
                 break
 
-        return State.IDLE, "Stopped"
+        return State.IDLE, stopped
 
     # ── Steps ───────────────────────────────────────────────────────────────
 
@@ -193,25 +215,25 @@ class Joiner:
         ex, ey = self._expected_cursor
         return math.hypot(x - ex, y - ey) > cfg.mouse_tolerance
 
-    def _wait_until_ready(self, cfg: JoinerConfig) -> str | None:
+    def _wait_until_ready(self, cfg: JoinerConfig) -> Message | None:
         """Hold while the game is not active. Returns a reason if we must stop."""
         paused = False
         while True:
             if self._stop.is_set():
-                return "Stopped"
-            if self._mouse_moved(cfg):
-                self._listener.on_log("You moved the mouse, stopped so you can take over")
-                return "Stopped because you moved the mouse"
+                return msg("state.stopped")
+            if not paused and self._mouse_moved(cfg):
+                self._listener.on_log(msg("log.mouse_moved"))
+                return msg("state.stopped_mouse")
             if not cfg.require_game_focus or self._guard.is_game_focused():
                 if paused:
-                    self._listener.on_log("Arma Reforger is active again, resuming")
+                    self._listener.on_log(msg("log.focus_back"))
                 return None
             if not paused:
                 paused = True
-                self._listener.on_log("Arma Reforger is not the active window, waiting")
-                self._listener.on_state(State.PAUSED, "Waiting for the Arma Reforger window")
+                self._listener.on_log(msg("log.waiting_focus"))
+                self._listener.on_state(State.PAUSED, msg("state.waiting_focus"))
             if self._wait(0.5):
-                return "Stopped"
+                return msg("state.stopped")
 
     def _watch(self, vision: Vision, cfg: JoinerConfig) -> Outcome:
         """Poll the dialog area until it shows 'server full' or the queue."""
@@ -245,5 +267,5 @@ class Joiner:
                 self._expected_cursor = pos
                 self._wait(0.05)
                 return
-            self._listener.on_log("ESC button not found on screen, pressing the key")
+            self._listener.on_log(msg("log.esc_not_found"))
         self._inputs.press_escape(cfg.escape_hold)

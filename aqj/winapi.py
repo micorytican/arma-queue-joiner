@@ -11,6 +11,8 @@ import os
 import time
 from ctypes import wintypes
 
+from .joiner import InputBlockedError
+
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
@@ -24,6 +26,8 @@ KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
 SCANCODE_ESCAPE = 0x01
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+FLASHW_ALL = 0x3
+FLASHW_TIMERNOFG = 0xC
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -88,7 +92,10 @@ user32.FlashWindowEx.argtypes = [ctypes.POINTER(FLASHWINFO)]
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.QueryFullProcessImageNameW.argtypes = [
-    wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
+    wintypes.HANDLE,
+    wintypes.DWORD,
+    wintypes.LPWSTR,
+    ctypes.POINTER(wintypes.DWORD),
 ]
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
@@ -97,10 +104,7 @@ def _send(*inputs: INPUT) -> None:
     array = (INPUT * len(inputs))(*inputs)
     sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
     if sent != len(inputs):
-        raise OSError(
-            "Windows blocked the input. If Arma Reforger runs as administrator, "
-            "run Queue Joiner as administrator too."
-        )
+        raise InputBlockedError(f"SendInput sent {sent} of {len(inputs)} events")
 
 
 def _mouse(flags: int) -> INPUT:
@@ -171,7 +175,6 @@ class WinFocusGuard:
 
 
 def flash_taskbar(hwnd: int, count: int = 5) -> None:
-    FLASHW_ALL, FLASHW_TIMERNOFG = 0x3, 0xC
     info = FLASHWINFO(ctypes.sizeof(FLASHWINFO), hwnd, FLASHW_ALL | FLASHW_TIMERNOFG, count, 0)
     user32.FlashWindowEx(ctypes.byref(info))
 
@@ -182,9 +185,12 @@ def set_title_bar_theme(hwnd: int, dark: bool) -> None:
         dwmapi = ctypes.WinDLL("dwmapi")
         value = ctypes.c_int(1 if dark else 0)
         for attribute in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (new id, then old)
-            if dwmapi.DwmSetWindowAttribute(
-                wintypes.HWND(hwnd), attribute, ctypes.byref(value), ctypes.sizeof(value)
-            ) == 0:
+            if (
+                dwmapi.DwmSetWindowAttribute(
+                    wintypes.HWND(hwnd), attribute, ctypes.byref(value), ctypes.sizeof(value)
+                )
+                == 0
+            ):
                 break
     except OSError:
         pass

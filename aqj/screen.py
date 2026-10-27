@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import mss
 import numpy as np
 
@@ -17,7 +19,7 @@ class ScreenVision:
 
     def __init__(self, x: int, y: int):
         self._point = (x, y)
-        self._sct: mss.base.MSSBase | None = None
+        self._sct: Any = None
         self.monitor: dict = {}
 
     def __enter__(self) -> ScreenVision:
@@ -41,8 +43,16 @@ class ScreenVision:
         shot = self._sct.grab(rect)
         return np.frombuffer(shot.raw, dtype=np.uint8).reshape(shot.height, shot.width, 4)
 
+    def retarget(self, x: int, y: int) -> None:
+        """Follow the mouse to another monitor (used by the diagnostics page)."""
+        self.monitor = self._monitor_at(x, y)
+
+    def grab_dialog(self) -> np.ndarray:
+        """BGRA pixels of the dialog area."""
+        return self._grab(DIALOG_REGION.to_rect(self.monitor))
+
     def read_dialog(self) -> DialogReading:
-        return analyze_dialog(self._grab(DIALOG_REGION.to_rect(self.monitor)))
+        return analyze_dialog(self.grab_dialog())
 
     def find_esc(self) -> tuple[int, int] | None:
         rect = ESC_REGION.to_rect(self.monitor)

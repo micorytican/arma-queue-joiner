@@ -31,10 +31,12 @@ def test_v1_keys_are_migrated(tmp_path):
 
 
 def test_values_are_clamped_and_types_checked():
-    s = Settings.from_dict({"wait_after_click": 999, "escape_hold": -1, "sound": "yes", "connect_timeout": "x"})
+    s = Settings.from_dict(
+        {"wait_after_click": 999, "escape_hold": -1, "sound": "yes", "connect_timeout": "x"}
+    )
     assert s.wait_after_click == 10.0
     assert s.escape_hold == 0.05
-    assert s.sound is True          # a string is not a bool, default kept
+    assert s.sound is True  # a string is not a bool, default kept
     assert s.connect_timeout == 8.0
 
 
