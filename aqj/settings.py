@@ -40,6 +40,8 @@ class Settings:
     require_game_focus: bool = True
     stop_on_mouse_move: bool = True
 
+    notify_queue: bool = True  # alert when the queue screen shows
+    notify_game: bool = True  # alert when the game has loaded the server
     sound: bool = True
     phone_notify: bool = False
     ntfy_topic: str = ""

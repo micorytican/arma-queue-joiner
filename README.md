@@ -1,6 +1,6 @@
 # Arma Reforger Queue Joiner
 
-Keeps pressing **Join** on a full Arma Reforger server until you get into the queue, then tells you with a sound, a Windows notification and, if you like, a push to your phone or a Discord message.
+Keeps pressing **Join** on a full Arma Reforger server until you get into the queue, then tells you with a sound, a Windows notification and, if you like, a push to your phone or a Discord message. When the queue lets you in and the game has loaded the server, you get a second alert, so you can leave the PC while you wait.
 
 [![CI](https://github.com/micorytican/arma-queue-joiner/actions/workflows/ci.yml/badge.svg)](https://github.com/micorytican/arma-queue-joiner/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011-lightgrey)
@@ -27,6 +27,7 @@ Windows SmartScreen may warn that the publisher is unknown, because the app is n
 3. Press **F6**, or click **Start** in the app and move the mouse to Join within 3 seconds.
 4. Leave the mouse alone. The app clicks Join, closes the "server full" dialog and tries again.
 5. When you are in the queue it stops and alerts you. Keep the game open.
+6. When the queue lets you in, the app alerts you again once you are in the game. If the server drops you from the queue, you get told that too.
 
 Press **F4** to stop at any time. Moving the mouse also stops it, so you can always take back control.
 
@@ -36,6 +37,7 @@ Press **F4** to stop at any time. Moving the mouse also stops it, so you can alw
 - **English and Ukrainian.** Picks your Windows language; change it in Settings.
 - **Safe by default.** Clicks only while Arma Reforger is the active window and stops when you move the mouse.
 - **Alerts:** sound, Windows notification, phone push through the free [ntfy](https://ntfy.sh) app, Discord message through a webhook.
+- **Knows when you are in.** After the queue it follows the game's own log and alerts you when you are on the server, with the server name.
 - **Diagnostics page** shows what the app sees on screen right now, so you can tell why it does or does not react.
 - **Any resolution.** Detection scales with the screen size.
 - **Update check** against GitHub Releases at startup (can be turned off).
@@ -49,6 +51,8 @@ Press **F4** to stop at any time. Moving the mouse also stops it, so you can alw
 | Stop when I move the mouse | On | Lets you take over at once |
 | Fast close | Off | Clicks the on-screen ESC button instead of pressing the key; falls back to the key |
 | Timing | 0.10 / 8.00 / 0.00 / 0.10 s | Wait after clicking Join, retry if nothing happens after, pause between attempts, ESC hold |
+| When I get into the queue | On | Alert as soon as the queue screen shows |
+| When I'm in the game | On | Alert when the queue has let you in and the server has loaded |
 | Play a sound | On | Three short beeps |
 | Notify my phone | Off | Push through ntfy, see below |
 | Post to Discord | Off | Message to a channel through a webhook, see below |
@@ -80,6 +84,7 @@ Open **Settings › Diagnostics**. It shows the active window, your display, how
 | Status stays on *Waiting for the Arma Reforger window* | Click into the game. If Diagnostics says *Not Arma Reforger* while the game is in front, turn off *Only click inside Arma Reforger* and report it. |
 | Nothing is clicked | If Arma Reforger runs as administrator, run the app as administrator too. Windows blocks input from normal apps to elevated ones. |
 | A hotkey does not work | Another program uses it. Settings shows a message; pick a different key. |
+| No alert when I get into the game | Diagnostics shows *Game log*. If it says *Not found*, your Documents folder is somewhere unusual; report it with the Diagnostics report. |
 | It never detects the queue or the full dialog | Open the dialog in game, check the values on the Diagnostics page and include **Copy report** in a bug report. |
 
 **Reporting a bug:** open an [issue](https://github.com/micorytican/arma-queue-joiner/issues), paste the Diagnostics report (it leaves out your ntfy topic and Discord link) and attach the newest `aqj.log` from **Diagnostics › Open log folder**.
@@ -92,6 +97,8 @@ The app looks at two small parts of the screen and never reads game memory or ne
 - the bottom-left area, only for Fast close, to find the ESC button.
 
 It moves the mouse and presses keys the same way you would.
+
+After the queue it reads the game's own log file, `Documents\My Games\ArmaReforger\logs\logs_<date>\console.log`, to see when you have joined the server or been dropped from the queue. It only reads new lines, never changes the file and stops after you are in, after you press Start again, or after 3 hours.
 
 ## For developers
 

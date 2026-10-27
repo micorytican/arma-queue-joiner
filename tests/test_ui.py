@@ -192,3 +192,102 @@ def test_escape_goes_back(window, qtbot):
     window.show_page(win.SETTINGS)
     qtbot.keyClick(window.pages.currentWidget(), win.Qt.Key.Key_Escape)
     assert window.pages.currentIndex() == win.MAIN
+
+
+# ── After the queue: game log alerts ─────────────────────────────────────────
+
+JOIN_DATA = "12:09:18.617 BACKEND      : Server Join Data:"
+SERVER_NAME = "12:09:18.618  BACKEND      : Server Name:    '[EU] Test Server #1'"
+IN_GAME = "12:09:31.155 DEFAULT      : Entered online game state."
+QUEUE_GONE = "18:57:47.816 BACKEND   (E): Join Queue no longer exist!"
+
+
+@pytest.fixture
+def game_log(tmp_path, monkeypatch):
+    logs = tmp_path / "logs"
+    log = logs / "logs_2026-10-28_20-00-00" / "console.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("12:00:00.000 ENGINE       : Game successfully created.\n", "utf-8")
+    monkeypatch.setattr(win, "default_logs_dir", lambda: logs)
+
+    def write(*lines):
+        with log.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+
+    return write
+
+
+@pytest.fixture
+def alerts(window, monkeypatch):
+    sent = []
+    monkeypatch.setattr(window, "_announce", lambda title, text: sent.append((title, text)))
+    return sent
+
+
+def test_in_game_alert_after_the_queue(window, game_log, alerts):
+    window._on_state("success", msg("state.success", n=3))
+    assert window._watch is not None and window._watch_timer.isActive()
+    assert "another alert" in window.status_detail.text()
+    assert alerts[0][0] == "You're in the queue"
+
+    game_log(JOIN_DATA, SERVER_NAME)
+    window._poll_game_log()
+    assert window.status_title.text() == "Joining the server"
+    assert "[EU] Test Server #1" in window.status_detail.text()
+
+    game_log(IN_GAME)
+    window._poll_game_log()
+    assert window.status_title.text() == "You're in the game"
+    assert alerts[-1] == ("You're in the game", "Arma Reforger: you're on [EU] Test Server #1.")
+    assert window._watch is None and not window._watch_timer.isActive()
+
+
+def test_dropped_from_the_queue(window, game_log, alerts):
+    window._on_state("success", msg("state.success", n=1))
+    game_log(QUEUE_GONE)
+    window._poll_game_log()
+    assert window.status_title.text() == "Dropped out of the queue"
+    assert alerts[-1][0] == "Dropped out of the queue"
+    assert window._watch is None
+
+
+def test_queue_alert_can_be_turned_off(window, game_log, alerts):
+    window.sw_notify_queue.setChecked(False)
+    window._save_settings()
+    window._on_state("success", msg("state.success", n=1))
+    assert alerts == []
+    game_log(IN_GAME)
+    window._poll_game_log()
+    assert [title for title, _ in alerts] == ["You're in the game"]
+
+
+def test_game_alert_off_means_no_watching(window, game_log, alerts):
+    window.sw_notify_game.setChecked(False)
+    window._save_settings()
+    window._on_state("success", msg("state.success", n=1))
+    assert window._watch is None
+    assert "another alert" not in window.status_detail.text()
+
+
+def test_missing_game_log_is_reported(window, tmp_path, monkeypatch, alerts):
+    monkeypatch.setattr(win, "default_logs_dir", lambda: tmp_path / "nowhere")
+    window._on_state("success", msg("state.success", n=1))
+    assert window._watch is None
+    assert "Game log not found" in window.activity_view.toPlainText()
+
+
+def test_starting_again_stops_watching(window, game_log, alerts):
+    window._on_state("success", msg("state.success", n=1))
+    window.start_at((10, 10))
+    assert window._watch is None
+    game_log(IN_GAME)
+    window._poll_game_log()  # nothing happens once stopped
+    assert window.status_title.text() == "Trying to join"
+
+
+def test_watch_gives_up_after_the_limit(window, game_log, alerts, monkeypatch):
+    window._on_state("success", msg("state.success", n=1))
+    window._watch_started -= win.WATCH_LIMIT + 1
+    window._poll_game_log()
+    assert window._watch is None
+    assert "3 hours" in window.activity_view.toPlainText()

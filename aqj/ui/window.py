@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_NAME, REPO_URL, __version__, detection, logs, net, notify, updates, winapi
+from ..gamelog import LogFollower, QueueWatch, Stage, default_logs_dir, latest_console_log
 from ..hotkeys import HotkeyListener
 from ..i18n import LANGUAGE_NAMES, attempts, set_language, tr
 from ..joiner import Joiner, JoinerConfig, Message, State, msg
@@ -65,6 +66,7 @@ from .widgets import Card, ExpanderCard, GlyphIcon, Meter, SettingsCard, ToggleS
 log = logging.getLogger("aqj")
 
 COUNTDOWN_SECONDS = 3
+WATCH_LIMIT = 3 * 3600  # stop following the game log after three hours
 PAGE_MARGIN = 24
 MAIN, SETTINGS, DIAGNOSTICS = 0, 1, 2
 POINTING = Qt.CursorShape.PointingHandCursor
@@ -139,6 +141,9 @@ class MainWindow(QMainWindow):
         self._clock = self._timer(500, self._refresh_stats)
         self._countdown = self._timer(1000, self._tick_countdown)
         self._diag_timer = self._timer(400, self._refresh_diagnostics)
+        self._watch_timer = self._timer(1000, self._poll_game_log)
+        self._watch: QueueWatch | None = None
+        self._watch_started = 0.0
 
         self.pages = QStackedWidget()
         self.setCentralWidget(self.pages)
@@ -349,6 +354,12 @@ class MainWindow(QMainWindow):
         col.addWidget(timing)
 
         self._group(col, tr("group.alerts"))
+        self.sw_notify_queue = self._toggle(s.notify_queue)
+        col.addWidget(SettingsCard(Glyph.TIMER, tr("set.notify_queue"), tr("set.notify_queue.text"),
+                                   self.sw_notify_queue))  # fmt: skip
+        self.sw_notify_game = self._toggle(s.notify_game)
+        col.addWidget(SettingsCard(Glyph.GAME, tr("set.notify_game"), tr("set.notify_game.text"),
+                                   self.sw_notify_game))  # fmt: skip
         self.sw_sound = self._toggle(s.sound)
         col.addWidget(SettingsCard(Glyph.VOLUME, tr("set.sound"), tr("set.sound.text"), self.sw_sound))
 
@@ -457,6 +468,7 @@ class MainWindow(QMainWindow):
         self.diag_meters: dict[str, Meter] = {}
         rows = [
             ("window", "diag.window"),
+            ("gamelog", "diag.gamelog"),
             ("display", "diag.display"),
             ("red", "diag.red"),
             ("yellow", "diag.yellow"),
@@ -529,6 +541,8 @@ class MainWindow(QMainWindow):
             "diag.window.arma" if is_arma else "diag.window.other"
         )
         self.diag_values["window"].setText(window_text)
+        game_log = latest_console_log(default_logs_dir())
+        self.diag_values["gamelog"].setText(str(game_log) if game_log else tr("diag.gamelog.none"))
         report = {
             "version": __version__,
             "windows": platform.version(),
@@ -645,6 +659,8 @@ class MainWindow(QMainWindow):
             ntfy_topic=self.topic_edit.text(),
             discord_notify=self.sw_discord.isChecked(),
             discord_webhook=self.webhook_edit.text(),
+            notify_queue=self.sw_notify_queue.isChecked(),
+            notify_game=self.sw_notify_game.isChecked(),
             always_on_top=self.sw_top.isChecked(),
             close_to_tray=self.sw_tray.isChecked(),
             check_updates=self.sw_updates.isChecked(),
@@ -783,7 +799,31 @@ class MainWindow(QMainWindow):
                 Glyph.DONE,
                 "success",
                 tr("status.success.title"),
-                tr("status.success.text", detail=detail_text),
+                tr("status.success.watching" if self._watch else "status.success.text", detail=detail_text),
+                tr("button.start_again"),
+                True,
+            ),
+            "joining": (
+                Glyph.SYNC,
+                "accent",
+                tr("status.joining.title"),
+                detail_text,
+                tr("button.start_again"),
+                True,
+            ),
+            "in_game": (
+                Glyph.DONE,
+                "success",
+                tr("status.in_game.title"),
+                detail_text,
+                tr("button.start_again"),
+                True,
+            ),
+            "queue_lost": (
+                Glyph.WARNING,
+                "caution",
+                tr("status.queue_lost.title"),
+                tr("status.queue_lost.text"),
                 tr("button.start_again"),
                 True,
             ),
@@ -843,6 +883,7 @@ class MainWindow(QMainWindow):
         if self.joiner.running:
             return
         self._countdown.stop()
+        self._stop_watch()
         self._save_settings()
         s = self.settings
         config = JoinerConfig(
@@ -864,6 +905,7 @@ class MainWindow(QMainWindow):
         self.joiner.start(pos, config)
 
     def stop(self) -> None:
+        self._stop_watch()
         if self._ui_state == "countdown":
             self._countdown.stop()
             self._render("idle")
@@ -901,20 +943,65 @@ class MainWindow(QMainWindow):
         if state in ("success", "error", "idle"):
             self._clock.stop()
             self._finished_at = time.monotonic()
-        self._render(state, detail)
         if state == "success":
-            self._announce_success(detail)
+            self._start_watch()
+        self._render(state, detail)
+        if state == "success" and self.settings.notify_queue:
+            elapsed = fmt_elapsed((self._finished_at or 0) - (self._started_at or self._finished_at or 0))
+            n = int(detail.params.get("n", self._attempts))
+            self._announce(tr("push.title"), tr("push.text", n=n, time=elapsed))
 
-    def _announce_success(self, detail: Message) -> None:
+    # ── After the queue: follow the game's own log ──────────────────────────
+
+    def _start_watch(self) -> None:
+        self._stop_watch()
+        if not self.settings.notify_game:
+            return
+        follower = LogFollower(default_logs_dir())
+        if follower.path is None:
+            self._log(msg("log.watch_missing"))
+            return
+        self._watch = QueueWatch(follower)
+        self._watch_started = time.monotonic()
+        self._watch_timer.start()
+        self._log(msg("log.watch_start", path=follower.path.parent.name))
+
+    def _stop_watch(self) -> None:
+        self._watch_timer.stop()
+        self._watch = None
+
+    def _poll_game_log(self) -> None:
+        watch = self._watch
+        if watch is None:
+            return
+        if time.monotonic() - self._watch_started > WATCH_LIMIT:
+            self._log(msg("log.watch_timeout"))
+            self._stop_watch()
+            return
+        stage = watch.update()
+        server = watch.server or tr("unknown_server")
+        if stage is Stage.JOINING:
+            self._log(msg("log.joining", server=server))
+            self._render("joining", msg("status.joining.text", server=server))
+        elif stage is Stage.IN_GAME:
+            self._log(msg("log.in_game", server=server))
+            self._render("in_game", msg("status.in_game.text", server=server))
+            self._announce(tr("push.in_game.title"), tr("push.in_game.text", server=server))
+        elif stage is Stage.QUEUE_LOST:
+            self._log(msg("log.dropped"))
+            self._render("queue_lost")
+            self._announce(tr("push.queue_lost.title"), tr("push.queue_lost.text"))
+        if watch.finished:
+            self._stop_watch()
+
+    def _announce(self, title: str, text: str) -> None:
+        """Sound, taskbar flash, Windows notification, phone and Discord, as configured."""
         s = self.settings
-        elapsed = fmt_elapsed((self._finished_at or 0) - (self._started_at or self._finished_at or 0))
-        n = int(detail.params.get("n", self._attempts))
-        text = tr("push.text", n=n, time=elapsed)
         if s.sound:
             notify.play_alert()
         winapi.flash_taskbar(int(self.winId()))
         if self.tray is not None:
-            self.tray.showMessage(tr("push.title"), text, self._icon, 6000)
+            self.tray.showMessage(title, text, self._icon, 6000)
 
         def report(channel: str) -> Callable[[Any, Exception | None], None]:
             return lambda _r, err: (
@@ -922,7 +1009,7 @@ class MainWindow(QMainWindow):
             )
 
         if s.phone_notify and s.ntfy_topic:
-            net.in_background(lambda: notify.send_ntfy(s.ntfy_topic, tr("push.title"), text), report("ntfy"))
+            net.in_background(lambda: notify.send_ntfy(s.ntfy_topic, title, text), report("ntfy"))
         if s.discord_notify and notify.is_discord_webhook(s.discord_webhook):
             net.in_background(lambda: notify.send_discord(s.discord_webhook, text), report("Discord"))
 
@@ -1040,6 +1127,7 @@ class MainWindow(QMainWindow):
         self.close()
 
     def _shutdown(self) -> None:
+        self._stop_watch()
         self._save_timer.stop()
         self._diag_timer.stop()
         self._close_diag_vision()
