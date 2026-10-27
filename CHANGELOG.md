@@ -19,7 +19,7 @@ A full rewrite. Settings from 1.x are carried over.
 - Log files in `%APPDATA%\ArmaQueueJoiner\logs` and a message when something crashes.
 - Update check against GitHub Releases at startup (can be turned off).
 - Start button with a 3 second countdown, for playing without hotkeys.
-- lime98 intro at startup: head-up radar lock, a vector Su-27 in profile tearing in on afterburner, and a Cold War terminal typing the callsign; click to skip or turn it off.
+- lime98 intro at startup: head-up radar scan and lock, a dive into the target, then a Cold War terminal types the callsign; click to skip or turn it off.
 - Installer for the current user, in addition to the portable exe.
 - Only one copy runs at a time; starting it again shows the open window.
 

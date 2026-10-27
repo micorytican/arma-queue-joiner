@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/intro.gif" width="640" alt="A head-up radar locks a contact, a Su-27 tears in and stops, then a terminal types the callsign LIME98">
+  <img src="assets/intro.gif" width="640" alt="A head-up radar locks a contact, dives into it and a terminal types the callsign LIME98">
 </p>
 
 # Arma Reforger Queue Joiner
