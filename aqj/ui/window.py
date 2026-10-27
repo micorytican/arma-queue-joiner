@@ -392,8 +392,6 @@ class MainWindow(QMainWindow):
         col.addWidget(SettingsCard(Glyph.PIN, tr("set.top"), tr("set.top.text"), self.sw_top))
         self.sw_tray = self._toggle(s.close_to_tray)
         col.addWidget(SettingsCard(Glyph.MINIMIZE, tr("set.tray"), tr("set.tray.text"), self.sw_tray))
-        self.sw_intro = self._toggle(s.show_intro)
-        col.addWidget(SettingsCard(Glyph.PLAY, tr("set.intro"), tr("set.intro.text"), self.sw_intro))
         self.sw_updates = self._toggle(s.check_updates)
         col.addWidget(SettingsCard(Glyph.UPDATE, tr("set.updates"), tr("set.updates.text"), self.sw_updates))
         open_diag = push_button(tr("button.open"))
@@ -650,7 +648,6 @@ class MainWindow(QMainWindow):
             always_on_top=self.sw_top.isChecked(),
             close_to_tray=self.sw_tray.isChecked(),
             check_updates=self.sw_updates.isChecked(),
-            show_intro=self.sw_intro.isChecked(),
             language=str(self.combo_lang.currentData()),
             **{name: spin.value() for name, spin in self.spins.items()},
         ).normalized()

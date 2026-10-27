@@ -23,7 +23,6 @@ dev = [
     "ruff>=0.8",
     "basedpyright>=1.20",
     "pyinstaller>=6.11",
-    "Pillow>=11",
 ]
 
 [project.urls]
@@ -53,7 +52,7 @@ select = ["E", "F", "W", "B", "UP", "SIM", "I", "N", "RUF"]
 ignore = [
     "N802",    # Qt overrides use camelCase (paintEvent, sizeHint)
     "RUF001",  # Ukrainian strings contain letters that look like Latin ones
-    "RUF002",  # ...and so do docstrings and comments (Cyrillic HUD labels such as А)
+    "RUF002",  # ...and so do docstrings and comments
     "RUF003",
     "RUF012",
 ]

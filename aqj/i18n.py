@@ -181,11 +181,6 @@ STRINGS: dict[str, tuple[str, str]] = {
         "Keeps running in the notification area when you close the window",
         "Після закриття вікна програма працює в області сповіщень",
     ),
-    "set.intro": ("Play the intro", "Показувати заставку"),
-    "set.intro.text": (
-        "The radar logo at startup. Click it to skip.",
-        "Радар із логотипом під час запуску. Клікніть, щоб пропустити.",
-    ),
     "set.updates": ("Check for updates", "Перевіряти оновлення"),
     "set.updates.text": (
         "Asks GitHub for a newer version at startup. Nothing else is sent.",

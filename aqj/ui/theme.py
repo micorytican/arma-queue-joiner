@@ -46,7 +46,6 @@ class Glyph:
     UPDATE = ""  # update restore
     DIAGNOSTIC = ""
     WARNING = ""
-    PLAY = ""  # video
 
 
 @dataclass(frozen=True)

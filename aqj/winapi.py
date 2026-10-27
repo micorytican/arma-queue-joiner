@@ -179,25 +179,6 @@ def flash_taskbar(hwnd: int, count: int = 5) -> None:
     user32.FlashWindowEx(ctypes.byref(info))
 
 
-def animations_enabled() -> bool:
-    """False when 'Animation effects' is turned off in Windows accessibility settings."""
-    value = wintypes.BOOL(True)
-    spi_getclientareaanimation = 0x1042
-    if not user32.SystemParametersInfoW(spi_getclientareaanimation, 0, ctypes.byref(value), 0):
-        return True
-    return bool(value.value)
-
-
-def round_corners(hwnd: int) -> None:
-    """Windows 11 rounded corners for a frameless window. Ignored on Windows 10."""
-    try:
-        dwmapi = ctypes.WinDLL("dwmapi")
-        value = ctypes.c_int(2)  # DWMWCP_ROUND
-        dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), 33, ctypes.byref(value), ctypes.sizeof(value))
-    except OSError:
-        pass
-
-
 def set_title_bar_theme(hwnd: int, dark: bool) -> None:
     """Match the title bar to the app's light/dark mode (Windows 10 1809+ / 11)."""
     try:

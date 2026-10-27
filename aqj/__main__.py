@@ -42,7 +42,7 @@ def main() -> int:
     if _already_running():
         return 0
 
-    from . import logs, winapi
+    from . import logs
     from .ui import theme
     from .ui.window import MainWindow
 
@@ -70,14 +70,7 @@ def main() -> int:
 
         server.newConnection.connect(_on_connection)
 
-    if window.settings.show_intro and winapi.animations_enabled():
-        from .ui.intro import IntroWindow
-
-        intro = IntroWindow()
-        intro.finished.connect(window.show)
-        intro.play()
-    else:
-        window.show()
+    window.show()
     return app.exec()
 
 
