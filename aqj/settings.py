@@ -50,6 +50,7 @@ class Settings:
     always_on_top: bool = False
     close_to_tray: bool = True
     check_updates: bool = True
+    show_intro: bool = True
     language: str = "system"  # "system", "en" or "uk"
 
     def normalized(self) -> Settings:

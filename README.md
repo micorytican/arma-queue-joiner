@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/intro.gif" width="640" alt="A radar scope picks up a Su-27, then the callsign LIME98 appears">
+</p>
+
 # Arma Reforger Queue Joiner
 
 Keeps pressing **Join** on a full Arma Reforger server until you get into the queue, then tells you with a sound, a Windows notification and, if you like, a push to your phone or a Discord message.
@@ -39,6 +43,7 @@ Press **F4** to stop at any time. Moving the mouse also stops it, so you can alw
 - **Diagnostics page** shows what the app sees on screen right now, so you can tell why it does or does not react.
 - **Any resolution.** Detection scales with the screen size.
 - **Update check** against GitHub Releases at startup (can be turned off).
+- **Radar intro** at startup. Click to skip, or turn it off in Settings.
 
 ## Settings
 
@@ -54,6 +59,7 @@ Press **F4** to stop at any time. Moving the mouse also stops it, so you can alw
 | Post to Discord | Off | Message to a channel through a webhook, see below |
 | Language | Same as Windows | English or Ukrainian |
 | Keep on top / Close to the tray | Off / On | Window behaviour |
+| Play the intro | On | Radar logo at startup; skipped when Windows animations are off |
 | Check for updates | On | One request to GitHub at startup, nothing else is sent |
 
 Settings live in `%APPDATA%\ArmaQueueJoiner\settings.json`. Settings from 1.x are carried over.
@@ -114,6 +120,7 @@ Everything installs into `.venv` inside the project.
 | Type check | `.venv\Scripts\basedpyright` |
 | Portable exe | `build.bat` |
 | Portable exe and installer | `build.bat all` (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)) |
+| Intro GIF for this README | `.venv\Scripts\python tools\make_intro_gif.py` |
 
 See [docs/TESTING.md](docs/TESTING.md) for the test layers and the manual in-game checklist.
 
