@@ -39,7 +39,7 @@ def main() -> None:
     frames = [render(scene, i / FPS, i) for i in range(count)]
 
     # One shared palette, sampled from every phase, keeps colours steady (incl. the afterburners)
-    picks = [int(t * FPS) for t in (0.4, 0.95, 1.08, 1.14, 1.2)] + [count - 1]
+    picks = [int(t * FPS) for t in (0.4, 0.85, 1.3, 1.5, 1.6, 1.65)] + [count - 1]
     sample = Image.new("RGB", (WIDTH, HEIGHT * len(picks)))
     for k, i in enumerate(picks):
         sample.paste(frames[min(i, count - 1)], (0, HEIGHT * k))

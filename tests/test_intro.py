@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import QLineF
 from PySide6.QtGui import QColor, QImage, QPainter
 
 from aqj.ui import intro
@@ -12,52 +13,72 @@ def render(t: float, w: int = 640, h: int = 300) -> QImage:
     return img
 
 
-@pytest.mark.parametrize("t", [0.0, 0.2, 0.3, 0.62, 0.9, 1.1, 1.17, 1.2, 1.5, 2.3, 5.0])
+def bright(img: QImage, x0: int, x1: int, y0: int, y1: int) -> int:
+    return sum(1 for x in range(x0, x1, 4) for y in range(y0, y1, 4) if QColor(img.pixel(x, y)).green() > 200)
+
+
+@pytest.mark.parametrize("t", [0.0, 0.1, 0.4, 0.7, 0.78, 0.85, 1.1, 1.5, 1.58, 1.62, 2.0, 2.6, 5.0])
 def test_every_moment_renders(qapp, t):
     assert not render(t).isNull()
 
 
-def test_final_frame_shows_callsign(qapp):
-    end = render(intro.DURATION)
-    start = render(0.0)
-
-    def bright(img: QImage) -> int:
-        count = 0
-        for x in range(330, 640, 4):
-            for y in range(100, 200, 4):
-                if QColor(img.pixel(x, y)).green() > 200:
-                    count += 1
-        return count
-
-    assert bright(end) > 50  # LIME98 is drawn in the text area
-    assert bright(start) == 0
-
-
 def test_timeline_order():
-    assert 0 < intro.LOCK < intro.BREAKOUT < intro.IMPACT < intro.DURATION <= 2.5
+    assert 0 < intro.POWER_ON < intro.SCAN[1] < intro.LOCK < intro.IMPACT < intro.DURATION <= 3.0
 
 
-def test_jet_grows_while_it_flies_in(qapp):
+def test_final_frame_shows_callsign_in_the_middle(qapp):
+    assert bright(render(intro.DURATION), 140, 500, 100, 200) > 80
+    assert bright(render(0.0), 140, 500, 100, 200) == 0
+
+
+def test_hud_shows_contacts_after_the_scan(qapp):
+    w, h = 640, 300
     scene = intro.RadarIntro()
-    c, r = intro.QPointF(156, 150), 120.0
-    sizes = [scene._jet_state(640, 300, c, r, u)[1] for u in (0.0, 0.5, 0.9, 1.0)]
+    target = scene.contact_pos(w, h, intro.TARGET)
+    img = render(intro.SCAN[1] + 0.05)
+    x, y = int(target.x()), int(target.y())
+    assert bright(img, x - 12, x + 12, y - 4, y + 4) > 0
+
+
+def projected_length(scene: intro.RadarIntro, u: float, w: int = 640, h: int = 300) -> float:
+    cam = intro.Camera(w, h)
+    pose = scene.jet_pose(w, h, u)
+    nose = cam.project(intro.place((0, 0.5, 0), pose))
+    tail = cam.project(intro.place((0, -0.5, 0), pose))
+    assert nose is not None and tail is not None
+    return QLineF(nose, tail).length()
+
+
+def test_jet_starts_at_the_locked_contact_and_grows(qapp):
+    w, h = 640, 300
+    scene = intro.RadarIntro()
+    start = intro.Camera(w, h).project(scene.jet_pose(w, h, 0.0).position)
+    target = scene.contact_pos(w, h, intro.TARGET)
+    assert start is not None
+    assert abs(start.x() - target.x()) < 1 and abs(start.y() - target.y()) < 1
+    sizes = [projected_length(scene, u) for u in (0.0, 0.3, 0.6, 0.9, 0.99)]
     assert sizes == sorted(sizes)
-    assert sizes[-1] > 300  # bigger than the frame at the pass
+    assert sizes[0] < 60 < 300 < sizes[-1]
 
 
-def test_target_pass_times_follow_the_beam():
-    for k in range(3):
-        bearing = intro.beam_bearing(intro.pass_time(k))
-        assert bearing == pytest.approx(intro.TARGET_BEARING + 360 * k)
+def test_jet_is_seen_in_three_quarter_view(qapp):
+    """The wing must not collapse into a line: span on screen stays a good share of length."""
+    w, h = 640, 300
+    scene = intro.RadarIntro()
+    cam = intro.Camera(w, h)
+    pose = scene.jet_pose(w, h, 0.5)
+    left = cam.project(intro.place((-0.338, -0.2, 0), pose))
+    right = cam.project(intro.place((0.338, -0.2, 0), pose))
+    assert left is not None and right is not None
+    assert QLineF(left, right).length() > 0.3 * projected_length(scene, 0.5)
 
 
-def test_su27_outline_is_symmetric_and_closed(qapp):
-    path = intro.su27_path()
-    box = path.boundingRect()
-    assert box.left() == pytest.approx(-box.right())
-    assert box.height() > box.width()  # longer than its wingspan, nose up
-    first, last = path.elementAt(0), path.elementAt(path.elementCount() - 1)
-    assert (first.x, first.y) == pytest.approx((last.x, last.y))
+def test_su27_planform_is_symmetric():
+    points = intro.su27_planform()
+    xs = [x for x, _ in points]
+    assert min(xs) == pytest.approx(-max(xs))
+    ys = [y for _, y in points]
+    assert max(ys) - min(ys) > max(xs) - min(xs)  # longer than its wingspan
 
 
 def test_window_can_be_skipped(qtbot):

@@ -1,22 +1,27 @@
-"""lime98 intro, "Intercept": a radar locks a contact, the contact breaks out of
-the scope as a Su-27 that flies over the viewer, and the callsign slams in.
+"""lime98 intro, "Through the Su-27's eyes".
+
+The scene follows the Su-27's own sight: the ILS-31 head-up display shows the
+N001 radar picture as a top-down view (azimuth across, range up), contacts as
+short bars, double bars for friendlies, ИЗЛ while the radar transmits and the
+attack cue А once a target is locked. After the lock the camera dives into
+the target and a 3D vector Su-27 rushes past on afterburner. Flash, shake,
+and the callsign lands in the style of a Flanker's painted side number with
+the lock box slamming around it.
 
 Everything is drawn with QPainter from a single function of time, so the
 same code plays the startup splash live and renders the README GIF.
-Look: green phosphor scope, DIN lettering (Bahnschrift), one hot accent for
-the afterburners. About two seconds of action.
 """
 
 from __future__ import annotations
 
 import math
 import random
+from dataclasses import dataclass
 
 from PySide6.QtCore import QElapsedTimer, QLineF, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
-    QConicalGradient,
     QFont,
     QFontMetricsF,
     QKeyEvent,
@@ -26,31 +31,34 @@ from PySide6.QtGui import (
     QPainterPath,
     QPaintEvent,
     QPen,
+    QPolygonF,
     QRadialGradient,
-    QTransform,
 )
 from PySide6.QtWidgets import QApplication, QWidget
 
-PANEL = QColor("#070908")
-GLASS = QColor("#03110a")
-PHOSPHOR = QColor("#8cff9e")
-PHOSPHOR_DIM = QColor("#2f8a4b")
-GRID = QColor(76, 170, 104, 90)
-TEXT_DIM = QColor("#4f9d68")
-HULL = QColor("#06130b")
+PANEL = QColor("#050806")
+HUD = QColor("#8cff9e")
+HUD_DIM = QColor("#2f8a4b")
+HULL = QColor("#04110a")
 BURNER = QColor("#ffb347")
 WHITE = QColor("#f4fff6")
 
 # Timeline, seconds
-SWEEP_START = 0.08  # beam whips round
-SWEEP_PERIOD = 0.62
-TARGET_BEARING = 120.0  # degrees clockwise from north, lower right of the scope
-TARGET_RANGE = 0.58
-BREAKOUT = 0.62  # the contact leaves the scope as a Su-27
-FLYBY = 0.55  # seconds from breakout until the jet passes the camera
-IMPACT = BREAKOUT + FLYBY  # flash, shake, callsign slams in
-DURATION = IMPACT + 1.1  # splash length
-PERSISTENCE = 0.5
+POWER_ON = 0.18
+SCAN = (0.12, 0.62)  # the scan bar crosses the display once
+LOCK = 0.78  # designator closes on the target, attack cue on
+DIVE = 0.10  # camera dives into the target
+FLYBY = 0.80  # 3D pass, from far away to the camera
+IMPACT = LOCK + FLYBY  # flash, shake, callsign
+DURATION = IMPACT + 1.0
+
+AZIMUTH = 60  # degrees each side, as on the HUD scale
+CONTACTS = (  # (azimuth deg, range 0..1 from bottom, friendly)
+    (-38, 0.70, False),
+    (22, 0.62, False),  # the target
+    (44, 0.30, True),
+)
+TARGET = 1
 
 CALLSIGN = "LIME98"
 DISPLAY_FONT = "Bahnschrift"
@@ -67,7 +75,7 @@ def _ease_out(x: float) -> float:
 
 
 def _ease_in(x: float) -> float:
-    return _clamp(x) ** 3
+    return _clamp(x) ** 2
 
 
 def _with_alpha(color: QColor, alpha: float) -> QColor:
@@ -76,24 +84,34 @@ def _with_alpha(color: QColor, alpha: float) -> QColor:
     return c
 
 
-def _lerp(a: QPointF, b: QPointF, u: float) -> QPointF:
-    return QPointF(a.x() + (b.x() - a.x()) * u, a.y() + (b.y() - a.y()) * u)
+# 3D model ------------------------------------------------------------------------------
+
+Vec = tuple[float, float, float]
 
 
-def beam_bearing(t: float) -> float:
-    return (t - SWEEP_START) * 360.0 / SWEEP_PERIOD
+def _sub(a: Vec, b: Vec) -> Vec:
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 
-def pass_time(k: int) -> float:
-    """When the beam crosses the target for the k-th time (k = 0, 1, ...)."""
-    return SWEEP_START + (TARGET_BEARING + 360.0 * k) * SWEEP_PERIOD / 360.0
+def _add(a: Vec, b: Vec) -> Vec:
+    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
 
 
-LOCK = pass_time(0)  # first return is enough: the scope locks at once
+def _mul(a: Vec, k: float) -> Vec:
+    return (a[0] * k, a[1] * k, a[2] * k)
 
 
-def su27_path() -> QPainterPath:
-    """Top view of a Su-27, nose up, length about 1.0 centred on the origin.
+def _cross(a: Vec, b: Vec) -> Vec:
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _norm(a: Vec) -> Vec:
+    n = math.sqrt(a[0] ** 2 + a[1] ** 2 + a[2] ** 2) or 1.0
+    return (a[0] / n, a[1] / n, a[2] / n)
+
+
+def su27_planform() -> list[tuple[float, float]]:
+    """Top view of a Su-27, nose toward -y, length about 1.07, centred near the origin.
 
     Right half traced from the nose, then mirrored: long pointed nose, the big
     ogival leading-edge root extensions, cropped delta wings with tip rails,
@@ -120,31 +138,79 @@ def su27_path() -> QPainterPath:
         (0.112, 0.468), (0.050, 0.470), (0.044, 0.445),  # nozzle
         (0.022, 0.445), (0.014, 0.560), (0.000, 0.570),  # tail stinger
     ]  # fmt: skip
-    path = QPainterPath(QPointF(*right[0]))
-    for x, y in right[1:]:
-        path.lineTo(x, y)
-    for x, y in reversed(right[:-1]):
-        path.lineTo(-x, y)
-    path.closeSubpath()
-    return path
+    return right + [(-x, y) for x, y in reversed(right[1:-1])]
 
 
-def su27_tails() -> list[tuple[QPointF, QPointF]]:
-    """The twin vertical fins, seen from above as short canted lines."""
-    return [(QPointF(s * 0.124, 0.235), QPointF(s * 0.136, 0.430)) for s in (1, -1)]
+@dataclass(frozen=True)
+class Model:
+    """Model space: x to the right wing, y forward (nose), z up. Length about 1."""
+
+    planform: list[Vec]
+    fins: list[list[Vec]]
+    nacelles: list[list[Vec]]
+    spine: list[Vec]
+    canopy: list[Vec]
+    nozzles: list[Vec]
 
 
-def su27_panel_lines() -> list[tuple[QPointF, QPointF]]:
-    """A few structural lines so the jet reads when it fills the frame."""
-    lines = [(QPointF(0, -0.36), QPointF(0, 0.44))]
-    for s in (1, -1):
-        lines += [
-            (QPointF(s * 0.040, -0.06), QPointF(s * 0.070, 0.20)),  # intake
-            (QPointF(s * 0.070, 0.20), QPointF(s * 0.078, 0.445)),  # nacelle
-            (QPointF(s * 0.140, 0.010), QPointF(s * 0.300, 0.150)),  # leading-edge flap
-            (QPointF(s * 0.180, 0.205), QPointF(s * 0.300, 0.220)),  # flaperon
-        ]
-    return lines
+def su27_model() -> Model:
+    planform = [(x, -y, 0.0) for x, y in su27_planform()]
+    fins = [
+        [(s * 0.124, -0.235, 0.0), (s * 0.168, -0.335, 0.175), (s * 0.176, -0.405, 0.175),
+         (s * 0.136, -0.430, 0.0)]
+        for s in (1, -1)
+    ]  # fmt: skip
+    nacelles = [
+        [(s * 0.045, 0.02, -0.055), (s * 0.108, 0.02, -0.055), (s * 0.108, -0.46, -0.04),
+         (s * 0.045, -0.46, -0.04)]
+        for s in (1, -1)
+    ]  # fmt: skip
+    spine = [(0, 0.5, 0), (0, 0.38, 0.03), (0, 0.31, 0.07), (0, 0.22, 0.075), (0, 0.0, 0.055),
+             (0, -0.44, 0.03)]  # fmt: skip
+    canopy = [(0, 0.37, 0.035), (0.028, 0.30, 0.055), (0, 0.235, 0.078), (-0.028, 0.30, 0.055)]
+    nozzles = [(s * 0.078, -0.475, -0.03) for s in (1, -1)]
+    return Model(planform, fins, nacelles, spine, canopy, nozzles)
+
+
+@dataclass(frozen=True)
+class Pose:
+    position: Vec  # camera space: x right, y up, z into the screen
+    forward: Vec
+    roll: float  # degrees
+    up_hint: Vec = (0.0, 1.0, 0.0)  # where the top of the jet should face before roll
+
+
+class Camera:
+    def __init__(self, w: float, h: float):
+        self.cx, self.cy = w / 2, h / 2
+        self.f = h * 1.15
+
+    def project(self, p: Vec) -> QPointF | None:
+        if p[2] < 0.12:
+            return None
+        return QPointF(self.cx + self.f * p[0] / p[2], self.cy - self.f * p[1] / p[2])
+
+    def unproject(self, x: float, y: float, depth: float) -> Vec:
+        return ((x - self.cx) * depth / self.f, (self.cy - y) * depth / self.f, depth)
+
+
+def place(model_point: Vec, pose: Pose) -> Vec:
+    """Model space to camera space."""
+    fwd = _norm(pose.forward)
+    right = _norm(_cross(pose.up_hint, fwd))
+    if right == (0.0, 0.0, 0.0):
+        right = (1.0, 0.0, 0.0)
+    up = _cross(fwd, right)
+    r = math.radians(pose.roll)
+    right, up = (
+        _add(_mul(right, math.cos(r)), _mul(up, math.sin(r))),
+        _add(_mul(up, math.cos(r)), _mul(right, -math.sin(r))),
+    )
+    x, y, z = model_point
+    return _add(pose.position, _add(_mul(right, x), _add(_mul(fwd, y), _mul(up, z))))
+
+
+# Scene ---------------------------------------------------------------------------------
 
 
 class RadarIntro:
@@ -152,32 +218,245 @@ class RadarIntro:
 
     def __init__(self, seed: int = 98):
         rng = random.Random(seed)
-        self._grain = [(rng.uniform(-1, 1), rng.uniform(-1, 1), rng.random()) for _ in range(360)]
-        self._streaks = [(rng.uniform(-1, 1), rng.uniform(0.3, 1.0), rng.random()) for _ in range(26)]
-        self._plane = su27_path()
-        self._tails = su27_tails()
-        self._panels = su27_panel_lines()
-
-    # Scene ----------------------------------------------------------------------
+        self._streaks = [(rng.uniform(-1, 1), rng.uniform(0.3, 1.0), rng.random()) for _ in range(28)]
+        self._model = su27_model()
 
     def paint(self, p: QPainter, w: int, h: int, t: float, frame: int = 0) -> None:
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         p.fillRect(QRectF(0, 0, w, h), PANEL)
+        cam = Camera(w, h)
 
         p.save()
         p.translate(self._shake(t, h))
-        r = h * 0.40
-        c = QPointF(h * 0.52, h * 0.5)
-        dim = 1.0 - 0.55 * _ease_out((t - BREAKOUT) / 0.3)  # scope steps back once the jet is out
+        if t < LOCK + DIVE + 0.05:
+            self._hud(p, w, h, t, frame)
+        if LOCK <= t < IMPACT:
+            self._flyby(p, w, h, cam, t)
+        if t >= IMPACT:
+            self._callsign(p, w, h, t)
+        p.restore()
+        self._flash(p, w, h, t)
 
-        self._scope(p, c, r, t, frame, dim)
-        self._callsign(p, w, h, t)
-        if BREAKOUT <= t < IMPACT:
-            self._jet_flyby(p, w, h, c, r, t)
+    # HUD radar picture ----------------------------------------------------------------
+
+    @staticmethod
+    def scope_rect(w: float, h: float) -> QRectF:
+        return QRectF(w * 0.24, h * 0.14, w * 0.52, h * 0.66)
+
+    def contact_pos(self, w: float, h: float, index: int) -> QPointF:
+        az, rng, _ = CONTACTS[index]
+        r = self.scope_rect(w, h)
+        return QPointF(r.center().x() + r.width() / 2 * az / AZIMUTH, r.bottom() - r.height() * rng)
+
+    def _hud(self, p: QPainter, w: int, h: int, t: float, frame: int) -> None:
+        on = _ease_out(t / POWER_ON) * (1.0 if t > POWER_ON else (0.4, 1.0, 0.6)[frame % 3])
+        target = self.contact_pos(w, h, TARGET)
+
+        # The camera dives into the locked target
+        dive = _ease_in((t - LOCK) / DIVE)
+        p.save()
+        if dive > 0:
+            zoom = 1.0 + 5.0 * dive
+            p.translate(target)
+            p.scale(zoom, zoom)
+            p.translate(-target.x(), -target.y())
+            on *= 1.0 - dive
+
+        r = self.scope_rect(w, h)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        line = QPen(_with_alpha(HUD, 0.85 * on), 1.4)
+
+        # Azimuth scale along the bottom, range scale up the left side
+        p.setPen(line)
+        p.drawLine(QPointF(r.left(), r.bottom()), QPointF(r.right(), r.bottom()))
+        p.drawLine(QPointF(r.left(), r.top()), QPointF(r.left(), r.bottom()))
+        p.setFont(self._mono(h * 0.042))
+        for az in range(-AZIMUTH, AZIMUTH + 1, 10):
+            x = r.center().x() + r.width() / 2 * az / AZIMUTH
+            tall = az % 30 == 0
+            p.drawLine(QPointF(x, r.bottom()), QPointF(x, r.bottom() + (h * 0.03 if tall else h * 0.015)))
+            if tall:
+                p.setPen(_with_alpha(HUD_DIM, on))
+                p.drawText(QPointF(x - h * 0.03, r.bottom() + h * 0.08), f"{abs(az)}")
+                p.setPen(line)
+        for k in range(1, 6):
+            y = r.bottom() - r.height() * k / 5
+            p.drawLine(QPointF(r.left() - h * 0.02, y), QPointF(r.left(), y))
+        p.setPen(_with_alpha(HUD_DIM, on))
+        p.drawText(QPointF(r.left() - h * 0.11, r.top() + h * 0.03), "100")
+
+        # Radar transmitting
+        if (t > POWER_ON and int(t * 6) % 2 == 0) or t > SCAN[1]:
+            p.setFont(self._mono(h * 0.06, bold=True))
+            p.setPen(_with_alpha(HUD, on))
+            p.drawText(QPointF(w * 0.05, h * 0.16), "ИЗЛ")
+
+        # Scan bar and the contacts it paints
+        scan = _clamp((t - SCAN[0]) / (SCAN[1] - SCAN[0]))
+        if 0 < scan < 1:
+            x = r.left() + r.width() * scan
+            g = QLinearGradient(QPointF(x - r.width() * 0.12, 0), QPointF(x, 0))
+            g.setColorAt(0.0, _with_alpha(HUD, 0.0))
+            g.setColorAt(1.0, _with_alpha(HUD, 0.18 * on))
+            p.fillRect(QRectF(x - r.width() * 0.12, r.top(), r.width() * 0.12, r.height()), QBrush(g))
+            p.setPen(QPen(_with_alpha(HUD, on), 1.6))
+            p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()))
+        for i, (az, _rng, friendly) in enumerate(CONTACTS):
+            seen = (az + AZIMUTH) / (2 * AZIMUTH) < scan or t > SCAN[1]
+            if not seen:
+                continue
+            pos = self.contact_pos(w, h, i)
+            p.setPen(QPen(_with_alpha(HUD, on), 2.2))
+            half = h * 0.03
+            p.drawLine(QPointF(pos.x() - half, pos.y()), QPointF(pos.x() + half, pos.y()))
+            if friendly:
+                p.drawLine(QPointF(pos.x() - half, pos.y() + 5), QPointF(pos.x() + half, pos.y() + 5))
+
+        # Target designator slides over and closes, attack cue А
+        slide = _ease_out((t - SCAN[1]) / (LOCK - SCAN[1]))
+        if slide > 0:
+            start = QPointF(r.center().x(), r.bottom() - r.height() * 0.2)
+            pos = QPointF(
+                start.x() + (target.x() - start.x()) * slide, start.y() + (target.y() - start.y()) * slide
+            )
+            gap = h * (0.16 - 0.10 * slide)
+            p.setPen(QPen(_with_alpha(HUD, on), 1.8))
+            for s in (-1, 1):
+                x = pos.x() + s * gap
+                p.drawLine(QPointF(x, pos.y() - gap * 0.7), QPointF(x, pos.y() + gap * 0.7))
+            if t >= LOCK:
+                box = h * 0.07
+                p.drawRect(QRectF(target.x() - box, target.y() - box, 2 * box, 2 * box))
+                p.setFont(self._mono(h * 0.09, bold=True))
+                p.drawText(QPointF(w * 0.85, h * 0.6), "А")
         p.restore()
 
-        self._flash(p, w, h, t)
+    # 3D pass --------------------------------------------------------------------------
+
+    def _jet_position(self, w: float, h: float, u: float) -> Vec:
+        """Camera-space position at flyby progress u.
+
+        The screen path runs from the locked contact to mid-frame, then whips off
+        the top-left edge; depth shrinks exponentially, so the jet keeps visibly
+        rushing at the camera instead of popping up at the very end.
+        """
+        cam = Camera(w, h)
+        target = self.contact_pos(w, h, TARGET)
+        mid = QPointF(w * 0.44, h * 0.56)
+        exit_ = QPointF(-w * 0.05, -h * 0.55)
+        if u < 0.82:
+            k = _ease_out(u / 0.82)
+            screen = QPointF(target.x() + (mid.x() - target.x()) * k, target.y() + (mid.y() - target.y()) * k)
+        else:
+            k = _ease_in((u - 0.82) / 0.18)
+            screen = QPointF(mid.x() + (exit_.x() - mid.x()) * k, mid.y() + (exit_.y() - mid.y()) * k)
+        depth = 9.0 * (0.8 / 9.0) ** (_clamp(u) ** 1.25)
+        return cam.unproject(screen.x(), screen.y(), depth)
+
+    def jet_pose(self, w: float, h: float, u: float) -> Pose:
+        """Position plus attitude.
+
+        A jet flying straight at the camera shows only the edge of its wing, so
+        the attitude is set for a three-quarter view instead: nose up and to the
+        left, top turned toward the viewer, banking a little through the pass.
+        """
+        forward = _norm((-1.0, 0.55, -0.6))
+        up_hint = _norm((0.0, 0.45, -1.0))
+        return Pose(self._jet_position(w, h, u), forward, roll=18.0 - 45.0 * _ease_in(u), up_hint=up_hint)
+
+    def _flyby(self, p: QPainter, w: int, h: int, cam: Camera, t: float) -> None:
+        u = _clamp((t - LOCK) / FLYBY)
+        pose = self.jet_pose(w, h, u)
+        center = cam.project(pose.position)
+        if center is None:
+            return
+
+        if u > 0.45:  # zoom lines out of the jet
+            strength = _clamp((u - 0.45) / 0.3)
+            for angle_seed, ln, v in self._streaks:
+                ang = math.pi * angle_seed
+                dx, dy = math.cos(ang), math.sin(ang)
+                inner = h * (0.3 + ((v + u * 2.5) % 1.0) * 0.9)
+                a = QPointF(center.x() + dx * inner, center.y() + dy * inner)
+                b = QPointF(a.x() + dx * h * 0.45 * ln, a.y() + dy * h * 0.45 * ln)
+                g = QLinearGradient(a, b)
+                g.setColorAt(0.0, _with_alpha(HUD, 0.0))
+                g.setColorAt(1.0, _with_alpha(HUD, 0.4 * strength))
+                p.setPen(QPen(QBrush(g), 1.0 + 1.5 * v))
+                p.drawLine(QLineF(a, b))
+
+        for lag, alpha in ((0.012, 0.12),):  # a touch of motion smear
+            self._draw_jet(p, cam, self.jet_pose(w, h, max(0.0, u - lag)), alpha, burner=0.0)
+        self._draw_jet(p, cam, pose, 1.0, burner=_clamp(0.3 + u))
+
+    def _draw_jet(self, p: QPainter, cam: Camera, pose: Pose, alpha: float, burner: float) -> None:
+        m = self._model
+
+        def proj(points: list[Vec]) -> QPolygonF | None:
+            out = []
+            for pt in points:
+                q = cam.project(place(pt, pose))
+                if q is None:
+                    return None
+                out.append(q)
+            return QPolygonF(out)
+
+        nose = cam.project(place((0, 0.5, 0), pose))
+        tail = cam.project(place((0, -0.5, 0), pose))
+        if nose is None or tail is None:
+            return
+        size = QLineF(nose, tail).length()
+        line = max(1.1, size * 0.005)
+        glow = QPen(_with_alpha(HUD, 0.3 * alpha), line * 3.5)
+        sharp = QPen(_with_alpha(HUD, alpha), line)
+        fill = _with_alpha(HULL, 0.9 * alpha)
+
+        def shape(points: list[Vec], closed: bool = True, filled: bool = True) -> None:
+            poly = proj(points)
+            if poly is None:
+                return
+            p.setBrush(fill if filled else Qt.BrushStyle.NoBrush)
+            for pen in (glow, sharp):
+                p.setPen(pen)
+                if closed:
+                    p.drawPolygon(poly)
+                else:
+                    p.drawPolyline(poly)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+
+        for nacelle in m.nacelles:
+            shape(nacelle)
+        shape(m.planform)
+        for fin in m.fins:
+            shape(fin)
+        shape(m.spine, closed=False, filled=False)
+        shape(m.canopy)
+
+        if burner > 0:
+            back = _mul(_norm(pose.forward), -1.0)
+            radius = max(3.0, size * 0.04)
+            for n in m.nozzles:
+                start = place(n, pose)
+                a = cam.project(start)
+                b = cam.project(_add(start, _mul(back, 0.35 * burner)))
+                if a is None or b is None:
+                    continue
+                plume = QLinearGradient(a, b)
+                plume.setColorAt(0.0, _with_alpha(WHITE, 0.95 * alpha))
+                plume.setColorAt(0.3, _with_alpha(BURNER, 0.85 * alpha))
+                plume.setColorAt(1.0, _with_alpha(BURNER, 0.0))
+                cap = Qt.PenCapStyle.RoundCap
+                p.setPen(QPen(QBrush(plume), max(2.0, size * 0.045), Qt.PenStyle.SolidLine, cap))
+                p.drawLine(QLineF(a, b))
+                core = QRadialGradient(a, radius)
+                core.setColorAt(0.0, _with_alpha(WHITE, alpha))
+                core.setColorAt(1.0, _with_alpha(BURNER, 0.0))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(core))
+                p.drawEllipse(a, radius, radius)
+
+    # Impact and callsign ------------------------------------------------------------
 
     @staticmethod
     def _shake(t: float, h: float) -> QPointF:
@@ -187,254 +466,69 @@ class RadarIntro:
         amp = h * 0.035 * math.exp(-age / 0.09)
         return QPointF(amp * math.sin(age * 97.0), amp * math.cos(age * 71.0))
 
-    # Scope -------------------------------------------------------------------------
-
-    def _scope(self, p: QPainter, c: QPointF, r: float, t: float, frame: int, dim: float) -> None:
-        open_ = _ease_out(t / 0.22)
-        rr = r * (0.6 + 0.4 * open_)
-
-        # Bezel: one bold ring with tick marks, no clutter
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(_with_alpha(PHOSPHOR_DIM, dim * open_), r * 0.035))
-        p.drawEllipse(c, rr * 1.06, rr * 1.06)
-        p.setPen(QPen(_with_alpha(TEXT_DIM, dim * open_), 1.2))
-        for deg in range(0, 360, 15):
-            a = math.radians(deg)
-            inner = rr * (1.10 if deg % 45 else 1.09)
-            outer = rr * (1.14 if deg % 45 else 1.18)
-            p.drawLine(QPointF(c.x() + inner * math.sin(a), c.y() - inner * math.cos(a)),
-                       QPointF(c.x() + outer * math.sin(a), c.y() - outer * math.cos(a)))  # fmt: skip
-
-        p.save()
-        clip = QPainterPath()
-        clip.addEllipse(c, rr, rr)
-        p.setClipPath(clip)
-        glass = QRadialGradient(c, rr)
-        glass.setColorAt(0.0, QColor("#07200f"))
-        glass.setColorAt(1.0, QColor("#010604"))
-        p.fillRect(QRectF(c.x() - rr, c.y() - rr, 2 * rr, 2 * rr), QBrush(glass))
-
-        # Range rings burst outward as the scope powers on
-        for i, k in enumerate((0.33, 0.66)):
-            grow = _ease_out((t - 0.04 * i) / 0.25)
-            p.setPen(QPen(_with_alpha(GRID, dim), 1.2))
-            p.drawEllipse(c, rr * k * grow, rr * k * grow)
-        p.drawLine(QPointF(c.x() - rr, c.y()), QPointF(c.x() + rr, c.y()))
-        p.drawLine(QPointF(c.x(), c.y() - rr), QPointF(c.x(), c.y() + rr))
-
-        if t >= SWEEP_START:
-            self._sweep(p, c, rr, t, dim)
-        self._contact(p, c, rr, t)
-        self._grain_layer(p, c, rr, frame, dim)
-        p.restore()
-
-    def _sweep(self, p: QPainter, c: QPointF, r: float, t: float, dim: float) -> None:
-        bearing = beam_bearing(t)
-        trail = QConicalGradient(c, 90.0 - bearing)
-        trail.setColorAt(0.0, _with_alpha(PHOSPHOR, 0.55 * dim))
-        trail.setColorAt(0.08, _with_alpha(PHOSPHOR, 0.18 * dim))
-        trail.setColorAt(0.28, _with_alpha(PHOSPHOR, 0.0))
-        trail.setColorAt(1.0, _with_alpha(PHOSPHOR, 0.0))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(trail))
-        p.drawEllipse(c, r, r)
-        a = math.radians(bearing)
-        tip = QPointF(c.x() + r * math.sin(a), c.y() - r * math.cos(a))
-        p.setPen(QPen(_with_alpha(PHOSPHOR, 0.4 * dim), 5.0))
-        p.drawLine(c, tip)
-        p.setPen(QPen(_with_alpha(PHOSPHOR, dim), 1.6))
-        p.drawLine(c, tip)
-
-    def target_pos(self, c: QPointF, r: float) -> QPointF:
-        a = math.radians(TARGET_BEARING)
-        return QPointF(c.x() + r * TARGET_RANGE * math.sin(a), c.y() - r * TARGET_RANGE * math.cos(a))
-
-    def _contact(self, p: QPainter, c: QPointF, r: float, t: float) -> None:
-        if t < LOCK or t >= BREAKOUT + 0.06:
-            return
-        pos = self.target_pos(c, r)
-        age = t - LOCK
-        glow = 0.6 + 0.4 * math.exp(-age / PERSISTENCE)
-
-        # Ping: one ring rushing out of the contact
-        ping = _ease_out(age / 0.45)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(_with_alpha(PHOSPHOR, 0.8 * (1 - ping)), 2.0))
-        p.drawEllipse(pos, r * 0.9 * ping, r * 0.9 * ping)
-
-        # The blip swells just before it breaks out
-        swell = 1.0 + 1.5 * _ease_in((t - (BREAKOUT - 0.12)) / 0.12)
-        size = r * 0.04 * swell
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(_with_alpha(PHOSPHOR, 0.3 * glow))
-        p.drawEllipse(pos, size * 2.5, size * 2.5)
-        p.setBrush(_with_alpha(WHITE if swell > 1.2 else PHOSPHOR, glow))
-        p.drawEllipse(pos, size, size)
-
-        # Lock brackets slam in from wide to tight
-        snap = _ease_out(age / 0.14)
-        half = r * (0.75 - 0.6 * snap)
-        arm = half * 0.5
-        p.setPen(QPen(_with_alpha(PHOSPHOR, snap), 2.0))
-        for sx in (-1, 1):
-            for sy in (-1, 1):
-                k = QPointF(pos.x() + sx * half, pos.y() + sy * half)
-                p.drawLine(k, QPointF(k.x() - sx * arm, k.y()))
-                p.drawLine(k, QPointF(k.x(), k.y() - sy * arm))
-        if age > 0.12 and int(age * 14) % 2 == 0:
-            p.setFont(self._mono(r * 0.13, bold=True))
-            p.setPen(PHOSPHOR)
-            p.drawText(QPointF(pos.x() - half, pos.y() - half - r * 0.05), "LOCK")
-
-    def _grain_layer(self, p: QPainter, c: QPointF, r: float, frame: int, dim: float) -> None:
-        p.setPen(Qt.PenStyle.NoPen)
-        for i, (x, y, v) in enumerate(self._grain):
-            if (i + frame * 7) % 5:
-                continue
-            p.setBrush(_with_alpha(PHOSPHOR, (0.05 + 0.08 * v) * dim))
-            p.drawRect(QRectF(c.x() + x * r, c.y() + y * r, 1.2, 1.2))
-
-    # Jet ------------------------------------------------------------------------------
-
-    def _jet_state(self, w: int, h: int, c: QPointF, r: float, u: float) -> tuple[QPointF, float, float]:
-        """Position, length and heading of the jet at flyby progress u (0..1).
-
-        It climbs out of the scope to the middle of the frame while it grows,
-        as if rushing at the camera, then whips over the top-left edge.
-        """
-        start = self.target_pos(c, r)
-        mid = QPointF(w * 0.42, h * 0.52)
-        end = QPointF(w * 0.18, -h * 0.9)
-        if u < 0.78:
-            pos = _lerp(start, mid, _ease_out(u / 0.78))
-        else:
-            pos = _lerp(mid, end, _ease_in((u - 0.78) / 0.22))
-        small, big = r * 0.08, h * 2.4
-        length = small * (big / small) ** (u**2.2)
-        heading = -28.0 + 10.0 * u  # nose up and to the left, easing into the pass
-        return pos, length, heading
-
-    def _jet_flyby(self, p: QPainter, w: int, h: int, c: QPointF, r: float, t: float) -> None:
-        if t >= IMPACT:
-            return
-        u = _clamp((t - BREAKOUT) / FLYBY)
-        pos, length, heading = self._jet_state(w, h, c, r, u)
-
-        if u > 0.4:  # zoom lines rushing out from the jet
-            strength = _clamp((u - 0.4) / 0.35)
-            for angle_seed, ln, v in self._streaks:
-                ang = math.pi * angle_seed
-                dx, dy = math.cos(ang), math.sin(ang)
-                inner = h * (0.35 + ((v + u * 2.5) % 1.0) * 0.9)
-                outer = inner + h * 0.45 * ln
-                a = QPointF(pos.x() + dx * inner, pos.y() + dy * inner)
-                b = QPointF(pos.x() + dx * outer, pos.y() + dy * outer)
-                g = QLinearGradient(a, b)
-                g.setColorAt(0.0, _with_alpha(PHOSPHOR, 0.0))
-                g.setColorAt(1.0, _with_alpha(PHOSPHOR, 0.45 * strength))
-                p.setPen(QPen(QBrush(g), 1.0 + 1.5 * v))
-                p.drawLine(QLineF(a, b))
-
-        for lag, alpha in ((0.05, 0.06), (0.03, 0.11), (0.012, 0.2)):  # motion smear
-            gp, gl, gh = self._jet_state(w, h, c, r, max(0.0, u - lag))
-            self._draw_jet(p, gp, gl, gh, alpha, burner=0.0)
-        self._draw_jet(p, pos, length, heading, 1.0, burner=_clamp(u * 1.6))
-
-    def _draw_jet(self, p: QPainter, pos: QPointF, length: float, heading: float, alpha: float,
-                  burner: float) -> None:  # fmt: skip
-        xf = QTransform()
-        xf.translate(pos.x(), pos.y())
-        xf.rotate(heading)
-        xf.scale(length, length)
-        line = max(1.2, length * 0.006)
-
-        if burner > 0:  # afterburner plumes behind the nozzles
-            for s in (1, -1):
-                n = xf.map(QPointF(s * 0.078, 0.50))
-                tail = xf.map(QPointF(s * 0.078, 0.50 + 0.38 * burner))
-                plume = QLinearGradient(n, tail)
-                plume.setColorAt(0.0, _with_alpha(WHITE, 0.95 * alpha))
-                plume.setColorAt(0.25, _with_alpha(BURNER, 0.8 * alpha))
-                plume.setColorAt(1.0, _with_alpha(BURNER, 0.0))
-                p.setPen(QPen(QBrush(plume), length * 0.042, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-                p.drawLine(QLineF(n, tail))
-
-        body = xf.map(self._plane)
-        p.setPen(QPen(_with_alpha(PHOSPHOR, 0.35 * alpha), line * 3.5))
-        p.setBrush(_with_alpha(HULL, 0.92 * alpha))
-        p.drawPath(body)
-        p.setPen(QPen(_with_alpha(PHOSPHOR, alpha), line))
-        p.drawPath(body)
-        p.setPen(QPen(_with_alpha(PHOSPHOR_DIM, alpha), line * 0.8))
-        for a, b in self._panels:
-            p.drawLine(xf.map(a), xf.map(b))
-        p.setPen(QPen(_with_alpha(PHOSPHOR, alpha), line))
-        for a, b in self._tails:
-            p.drawLine(xf.map(a), xf.map(b))
-        canopy = QPainterPath()
-        canopy.addEllipse(QPointF(0, -0.30), 0.018, 0.055)
-        p.setBrush(_with_alpha(PHOSPHOR, 0.55 * alpha))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawPath(xf.map(canopy))
-
-    # Impact ------------------------------------------------------------------------------
-
     @staticmethod
     def _flash(p: QPainter, w: int, h: int, t: float) -> None:
         age = t - IMPACT
-        if age < -0.02 or age > 0.30:
+        if age < -0.02 or age > 0.3:
             return
-        strength = 0.9 * math.exp(-max(0.0, age) / 0.05)
-        p.fillRect(QRectF(0, 0, w, h), _with_alpha(WHITE, strength))
+        p.fillRect(QRectF(0, 0, w, h), _with_alpha(WHITE, 0.9 * math.exp(-max(0.0, age) / 0.05)))
 
     def _callsign(self, p: QPainter, w: int, h: int, t: float) -> None:
         age = t - IMPACT
-        if age < 0:
-            return
-        x = h * 1.08
         font = QFont(DISPLAY_FONT)
-        font.setPixelSize(int(h * 0.30))
+        font.setPixelSize(int(h * 0.40))
         font.setWeight(QFont.Weight.Bold)
-        font.setStretch(QFont.Stretch.Condensed)
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, h * 0.012)
+        font.setStretch(QFont.Stretch.SemiCondensed)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, h * 0.015)
         fm = QFontMetricsF(font)
         text_w = fm.horizontalAdvance(CALLSIGN)
-        baseline = h * 0.5 + fm.capHeight() * 0.5
+        cap = fm.capHeight()
+        x = (w - text_w) / 2
+        baseline = h * 0.5 + cap / 2
+        centre = QPointF(w / 2, h * 0.5)
 
-        # Slam: comes in big, lands with a small overshoot
-        k = _clamp(age / 0.16)
-        scale = 1.0 + 0.55 * (1 - k) ** 3 - 0.04 * math.sin(math.pi * _clamp((age - 0.16) / 0.12))
-        centre = QPointF(x + text_w / 2, baseline - fm.capHeight() / 2)
+        k = _clamp(age / 0.14)
+        scale = 1.0 + 0.5 * (1 - k) ** 3 - 0.035 * math.sin(math.pi * _clamp((age - 0.14) / 0.12))
+        hot = math.exp(-age / 0.16)
+        round_cap, round_join = Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin
+        solid = Qt.PenStyle.SolidLine
 
-        # Shock streak behind the word on impact
-        burst = math.exp(-age / 0.18)
-        g = QLinearGradient(QPointF(x - h * 0.3, 0), QPointF(x + text_w + h * 0.3, 0))
-        g.setColorAt(0.0, _with_alpha(PHOSPHOR, 0.0))
-        g.setColorAt(0.5, _with_alpha(PHOSPHOR, 0.45 * burst))
-        g.setColorAt(1.0, _with_alpha(PHOSPHOR, 0.0))
-        p.fillRect(QRectF(x - h * 0.3, centre.y() - h * 0.012, text_w + h * 0.6, h * 0.024), QBrush(g))
-
+        path = QPainterPath()
+        path.addText(QPointF(x, baseline), font, CALLSIGN)
         p.save()
         p.translate(centre)
         p.scale(scale, scale)
         p.translate(-centre.x(), -centre.y())
-        path = QPainterPath()
-        path.addText(QPointF(x, baseline), font, CALLSIGN)
+        # Side-number style: outer outline, a dark gap, then the solid figure
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(_with_alpha(PHOSPHOR, 0.25 + 0.5 * burst), h * (0.02 + 0.03 * burst)))
-        p.drawPath(path)  # glow, hot on impact
+        glow = _with_alpha(HUD, 0.18 + 0.4 * hot)
+        p.setPen(QPen(QBrush(glow), h * 0.05, solid, round_cap, round_join))
+        p.drawPath(path)
+        p.setPen(QPen(QBrush(HUD), h * 0.028, solid, round_cap, round_join))
+        p.drawPath(path)
+        p.setPen(QPen(QBrush(PANEL), h * 0.014, solid, round_cap, round_join))
+        p.drawPath(path)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(_with_alpha(WHITE, burst) if burst > 0.5 else PHOSPHOR)
+        p.setBrush(_with_alpha(WHITE, hot) if hot > 0.45 else HUD)
         p.drawPath(path)
         p.restore()
 
-        label = _ease_out((age - 0.15) / 0.25)
-        p.setFont(self._mono(h * 0.05))
-        p.setPen(_with_alpha(TEXT_DIM, label))
-        p.drawText(QPointF(x + 2, baseline - fm.capHeight() - h * 0.05), "CALLSIGN")
-        rule_y = baseline + h * 0.06
-        p.setPen(QPen(_with_alpha(PHOSPHOR_DIM, label), 1.4))
-        p.drawLine(QPointF(x, rule_y), QPointF(x + text_w * _ease_out((age - 0.2) / 0.4), rule_y))
+        # The HUD locks onto the name
+        snap = _ease_out((age - 0.08) / 0.16)
+        if snap > 0:
+            pad_x = text_w * 0.5 + h * (0.05 + 0.5 * (1 - snap))
+            pad_y = cap * 0.5 + h * (0.06 + 0.5 * (1 - snap))
+            arm = h * 0.07
+            p.setPen(QPen(_with_alpha(HUD, snap), 2.0))
+            for sx in (-1, 1):
+                for sy in (-1, 1):
+                    corner = QPointF(centre.x() + sx * pad_x, centre.y() + sy * pad_y)
+                    p.drawLine(corner, QPointF(corner.x() - sx * arm, corner.y()))
+                    p.drawLine(corner, QPointF(corner.x(), corner.y() - sy * arm))
+            if age > 0.3 and (age > 0.6 or int(age * 12) % 2 == 0):
+                p.setFont(self._mono(h * 0.07, bold=True))
+                p.setPen(HUD)
+                p.drawText(QPointF(centre.x() + pad_x + h * 0.03, centre.y() + h * 0.025), "А")
 
     @staticmethod
     def _mono(px: float, bold: bool = False) -> QFont:
