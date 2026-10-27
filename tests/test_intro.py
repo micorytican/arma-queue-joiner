@@ -12,7 +12,7 @@ def render(t: float, w: int = 640, h: int = 300) -> QImage:
     return img
 
 
-@pytest.mark.parametrize("t", [0.0, 0.2, 0.5, 1.0, 1.6, 2.0, 2.6, 3.2, 5.0])
+@pytest.mark.parametrize("t", [0.0, 0.2, 0.3, 0.62, 0.9, 1.1, 1.17, 1.2, 1.5, 2.3, 5.0])
 def test_every_moment_renders(qapp, t):
     assert not render(t).isNull()
 
@@ -23,14 +23,26 @@ def test_final_frame_shows_callsign(qapp):
 
     def bright(img: QImage) -> int:
         count = 0
-        for x in range(300, 640, 4):
-            for y in range(190, 280, 4):
+        for x in range(330, 640, 4):
+            for y in range(100, 200, 4):
                 if QColor(img.pixel(x, y)).green() > 200:
                     count += 1
         return count
 
     assert bright(end) > 50  # LIME98 is drawn in the text area
     assert bright(start) == 0
+
+
+def test_timeline_order():
+    assert 0 < intro.LOCK < intro.BREAKOUT < intro.IMPACT < intro.DURATION <= 2.5
+
+
+def test_jet_grows_while_it_flies_in(qapp):
+    scene = intro.RadarIntro()
+    c, r = intro.QPointF(156, 150), 120.0
+    sizes = [scene._jet_state(640, 300, c, r, u)[1] for u in (0.0, 0.5, 0.9, 1.0)]
+    assert sizes == sorted(sizes)
+    assert sizes[-1] > 300  # bigger than the frame at the pass
 
 
 def test_target_pass_times_follow_the_beam():

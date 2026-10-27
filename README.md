@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/intro.gif" width="640" alt="A radar scope picks up a Su-27, then the callsign LIME98 appears">
+  <img src="assets/intro.gif" width="640" alt="A radar locks a contact, a Su-27 breaks out of the scope and the callsign LIME98 slams in">
 </p>
 
 # Arma Reforger Queue Joiner

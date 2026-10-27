@@ -20,7 +20,7 @@ from aqj.ui.intro import DURATION, RadarIntro  # noqa: E402
 WIDTH, HEIGHT = 640, 300
 FPS = 25
 HOLD = 1.6  # seconds the finished logo stays before the GIF loops
-COLORS = 96
+COLORS = 128
 
 
 def render(scene: RadarIntro, t: float, frame: int) -> Image.Image:
@@ -38,10 +38,11 @@ def main() -> None:
     count = int((DURATION + HOLD) * FPS)
     frames = [render(scene, i / FPS, i) for i in range(count)]
 
-    # One shared palette keeps the phosphor colour steady from frame to frame
-    sample = Image.new("RGB", (WIDTH, HEIGHT * 3))
-    for k, i in enumerate((count // 3, int(2.0 * FPS), count - 1)):
-        sample.paste(frames[i], (0, HEIGHT * k))
+    # One shared palette, sampled from every phase, keeps colours steady (incl. the afterburners)
+    picks = [int(t * FPS) for t in (0.4, 0.95, 1.08, 1.14, 1.2)] + [count - 1]
+    sample = Image.new("RGB", (WIDTH, HEIGHT * len(picks)))
+    for k, i in enumerate(picks):
+        sample.paste(frames[min(i, count - 1)], (0, HEIGHT * k))
     palette = sample.quantize(colors=COLORS, method=Image.Quantize.MEDIANCUT)
     paletted = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f in frames]
 
