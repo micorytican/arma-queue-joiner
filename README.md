@@ -8,7 +8,7 @@ Keeps pressing **Join** on a full Arma Reforger server until you get into the qu
 
 <p>
   <img src="assets/screenshot-main.png" width="360" alt="Main page after getting into the queue, dark theme">
-  <img src="assets/screenshot-settings.png" width="360" alt="Settings page in Ukrainian, light theme">
+  <img src="assets/screenshot-settings.png" width="360" alt="Settings page, light theme">
 </p>
 
 ## Download
