@@ -135,7 +135,7 @@ class Joiner:
         return final
 
     def _loop(self, vision: Vision, target: tuple[int, int], cfg: JoinerConfig) -> tuple[State, str]:
-        self._listener.on_log(f"Target JOIN button at {target[0]}, {target[1]}")
+        self._listener.on_log(f"Join button at {target[0]}, {target[1]}")
         self._listener.on_state(State.RUNNING, "Starting")
         self._expected_cursor = target
         if self._wait(cfg.start_delay):
@@ -148,7 +148,7 @@ class Joiner:
 
             self.attempt += 1
             self._listener.on_attempt(self.attempt)
-            self._listener.on_state(State.RUNNING, "Clicking JOIN")
+            self._listener.on_state(State.RUNNING, "Clicking Join")
             self._inputs.click(*target)
             if self._wait(cfg.double_click_gap):
                 break
@@ -201,7 +201,7 @@ class Joiner:
                 return "Stopped"
             if self._mouse_moved(cfg):
                 self._listener.on_log("You moved the mouse, stopped so you can take over")
-                return "Stopped: you moved the mouse"
+                return "Stopped because you moved the mouse"
             if not cfg.require_game_focus or self._guard.is_game_focused():
                 if paused:
                     self._listener.on_log("Arma Reforger is active again, resuming")

@@ -1,19 +1,20 @@
-"""Main window: status, start/stop, activity log and settings."""
+"""Main window, laid out like the Windows 11 Update and Settings pages."""
 
 from __future__ import annotations
 
+import html
 import secrets
 import time
+from collections import deque
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QFont, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDoubleSpinBox,
-    QGridLayout,
+    QFrame,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMainWindow,
     QMenu,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QStackedWidget,
     QSystemTrayIcon,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -31,13 +33,16 @@ from ..hotkeys import HotkeyListener
 from ..joiner import Joiner, JoinerConfig, State
 from ..screen import ScreenVision
 from ..settings import HOTKEYS, LIMITS, Settings
-from .widgets import KeyCap, StatusCard, SwitchRow, overline, rule
+from . import theme
+from .theme import Glyph
+from .widgets import Card, ExpanderCard, GlyphIcon, SettingsCard, ToggleSwitch, label
 
 COUNTDOWN_SECONDS = 3
+PAGE_MARGIN = 24
 
 
 class Bridge(QObject):
-    """Carries events from worker/hotkey threads to the UI thread (queued signals)."""
+    """Carries events from worker and hotkey threads to the UI thread (queued signals)."""
 
     state = Signal(str, str)
     attempt = Signal(int)
@@ -46,7 +51,6 @@ class Bridge(QObject):
     hotkey_error = Signal(str)
     ntfy_result = Signal(str)
 
-    # Joiner Listener interface
     def on_state(self, state: State, detail: str) -> None:
         self.state.emit(state.value, detail)
 
@@ -61,7 +65,11 @@ def fmt_elapsed(seconds: float) -> str:
     seconds = max(0, int(seconds))
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
 
 
 class MainWindow(QMainWindow):
@@ -72,265 +80,272 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._tray_hint_shown = False
         self._started_at: float | None = None
+        self._finished_at: float | None = None
+        self._attempts = 0
         self._countdown_left = 0
         self._ui_state = "idle"
+        self._last_detail = ""
+        self._activity: deque[tuple[str, str]] = deque(maxlen=200)
 
         self.bridge = Bridge()
         self.joiner = Joiner(ScreenVision, winapi.WinInput(), winapi.WinFocusGuard(), self.bridge)
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(icon)
-        self.setMinimumSize(380, 560)
-        self.resize(400, 620)
+        self.setMinimumSize(440, 600)
+        self.resize(480, 660)
 
         self._save_timer = QTimer(self, singleShot=True, interval=400, timeout=self._save_settings)
-        self._clock = QTimer(self, interval=500, timeout=self._tick_clock)
+        self._clock = QTimer(self, interval=500, timeout=self._refresh_stats)
         self._countdown = QTimer(self, interval=1000, timeout=self._tick_countdown)
-
-        self._build()
-        self._connect_bridge()
-        self._setup_tray()
-        self._apply_window_flags()
-
-        self.hotkeys = HotkeyListener(self.bridge.hotkey.emit, self.bridge.hotkey_error.emit)
-        self.hotkeys.start()
-        self._rebind_hotkeys()
-        self._set_idle("Hover JOIN in game, then start")
-
-    # ── Layout ──────────────────────────────────────────────────────────────
-
-    def _build(self) -> None:
-        root = QWidget(objectName="root")
-        self.setCentralWidget(root)
-        col = QVBoxLayout(root)
-        col.setContentsMargins(20, 16, 20, 16)
-        col.setSpacing(14)
-
-        header = QHBoxLayout()
-        titles = QVBoxLayout()
-        titles.setSpacing(0)
-        titles.addWidget(overline("Arma Reforger"))
-        title = QLabel("Queue Joiner", objectName="appTitle")
-        titles.addWidget(title)
-        header.addLayout(titles)
-        header.addStretch(1)
-        self.nav_main = QPushButton("Main", objectName="nav", checkable=True, checked=True)
-        self.nav_settings = QPushButton("Settings", objectName="nav", checkable=True)
-        for btn, index in ((self.nav_main, 0), (self.nav_settings, 1)):
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda _=False, i=index: self._show_page(i))
-            header.addWidget(btn, 0, Qt.AlignBottom)
-        header.setSpacing(16)
-        col.addLayout(header)
 
         self.pages = QStackedWidget()
         self.pages.addWidget(self._build_main_page())
         self.pages.addWidget(self._build_settings_page())
-        col.addWidget(self.pages, 1)
+        self.setCentralWidget(self.pages)
+
+        self._connect_bridge()
+        self._setup_tray()
+        self._apply_window_flags()
+        self.apply_theme()
+        QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _: self.apply_theme())
+
+        self.hotkeys = HotkeyListener(self.bridge.hotkey.emit, self.bridge.hotkey_error.emit)
+        self.hotkeys.start()
+        self._rebind_hotkeys()
+        self._render("idle")
+
+    # ── Main page ───────────────────────────────────────────────────────────
 
     def _build_main_page(self) -> QWidget:
-        page = QWidget()
+        page = QWidget(objectName="page")
         col = QVBoxLayout(page)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(12)
+        col.setContentsMargins(PAGE_MARGIN, 20, PAGE_MARGIN, PAGE_MARGIN)
+        col.setSpacing(0)
 
-        self.status = StatusCard()
-        col.addWidget(self.status)
+        header = QHBoxLayout()
+        header.addWidget(label("Queue Joiner", 28, weight=QFont.DemiBold, display=True))
+        header.addStretch(1)
+        settings_btn = self._icon_button(Glyph.SETTINGS, "Settings", lambda: self._show_page(1))
+        header.addWidget(settings_btn)
+        col.addLayout(header)
+        col.addSpacing(20)
 
-        self.primary = QPushButton("Start", objectName="primary")
-        self.primary.setCursor(Qt.PointingHandCursor)
-        self.primary.setProperty("mode", "start")
-        self.primary.clicked.connect(self._on_primary)
-        col.addWidget(self.primary)
+        # Status, Windows Update style: big icon, headline, details, action on the right
+        status = QHBoxLayout()
+        status.setSpacing(16)
+        self.status_icon = GlyphIcon(Glyph.READY, 40, "accent")
+        status.addWidget(self.status_icon, 0, Qt.AlignTop)
+        texts = QVBoxLayout()
+        texts.setSpacing(2)
+        self.status_title = label("", 20, weight=QFont.DemiBold, display=True)
+        self.status_title.setWordWrap(True)
+        self.status_detail = label("", 14, "secondary")
+        self.status_detail.setWordWrap(True)
+        self.status_stats = label("", 12, "tertiary")
+        texts.addWidget(self.status_title)
+        texts.addWidget(self.status_detail)
+        texts.addWidget(self.status_stats)
+        status.addLayout(texts, 1)
+        self.action = QPushButton("Start")
+        self.action.setMinimumWidth(120)
+        self.action.setCursor(Qt.PointingHandCursor)
+        self.action.clicked.connect(self._on_action)
+        status.addWidget(self.action, 0, Qt.AlignTop)
+        col.addLayout(status)
+        col.addSpacing(24)
 
-        hint = QHBoxLayout()
-        hint.setSpacing(6)
-        hint.addWidget(QLabel("In game: hover JOIN and press", objectName="hint"))
-        self.key_start = KeyCap(self.settings.start_hotkey)
-        hint.addWidget(self.key_start)
-        hint.addWidget(QLabel("· stop", objectName="hint"))
-        self.key_stop = KeyCap(self.settings.stop_hotkey)
-        hint.addWidget(self.key_stop)
-        hint.addStretch(1)
-        col.addLayout(hint)
-
+        change = QPushButton("Change")
+        change.setCursor(Qt.PointingHandCursor)
+        change.clicked.connect(lambda: self._show_page(1))
+        self.hotkey_card = SettingsCard(Glyph.KEYBOARD, "Hotkeys", "", change)
+        col.addWidget(self.hotkey_card)
         col.addSpacing(4)
-        col.addWidget(overline("How it works"))
-        steps = QGridLayout()
-        steps.setHorizontalSpacing(12)
-        steps.setVerticalSpacing(6)
-        lines = (
-            "Open the server browser and pick a full server",
-            "Hover the JOIN button, then press Start or the hotkey",
-            "Leave the mouse alone. It retries until you are in the queue",
-        )
-        for row, text in enumerate(lines):
-            steps.addWidget(QLabel(f"0{row + 1}", objectName="stepNo"), row, 0, Qt.AlignTop)
-            label = QLabel(text, objectName="muted")
-            label.setWordWrap(True)
-            steps.addWidget(label, row, 1)
-        steps.setColumnStretch(1, 1)
-        col.addLayout(steps)
 
-        col.addSpacing(4)
-        log_header = QHBoxLayout()
-        log_header.addWidget(overline("Activity"))
-        log_header.addStretch(1)
-        clear = QPushButton("Clear", objectName="link", cursor=Qt.PointingHandCursor)
-        clear.clicked.connect(lambda: self.log_view.clear())
-        log_header.addWidget(clear)
-        col.addLayout(log_header)
-
-        self.log_view = QPlainTextEdit(objectName="log", readOnly=True)
-        self.log_view.setMaximumBlockCount(300)
-        self.log_view.setPlaceholderText("Nothing yet")
-        self.log_view.setMinimumHeight(90)
-        col.addWidget(self.log_view, 1)
+        activity = Card()
+        a_col = QVBoxLayout(activity)
+        a_col.setContentsMargins(16, 12, 12, 12)
+        a_col.setSpacing(8)
+        a_head = QHBoxLayout()
+        a_head.setSpacing(16)
+        a_head.addWidget(GlyphIcon(Glyph.HISTORY, 20))
+        a_head.addWidget(label("Activity", 14), 1)
+        clear = QPushButton("Clear")
+        clear.setCursor(Qt.PointingHandCursor)
+        clear.clicked.connect(self._clear_activity)
+        a_head.addWidget(clear)
+        a_col.addLayout(a_head)
+        self.activity_view = QPlainTextEdit(objectName="activity", readOnly=True)
+        self.activity_view.setFrameShape(QFrame.NoFrame)
+        self.activity_view.setFont(theme.font(13))
+        self.activity_view.setPlaceholderText("Events from the current run show up here.")
+        self.activity_view.setMinimumHeight(120)
+        a_col.addWidget(self.activity_view, 1)
+        col.addWidget(activity, 1)
         return page
+
+    # ── Settings page ───────────────────────────────────────────────────────
 
     def _build_settings_page(self) -> QWidget:
         scroll = QScrollArea(widgetResizable=True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        page = QWidget()
+        scroll.setFrameShape(QFrame.NoFrame)
+        page = QWidget(objectName="page")
         col = QVBoxLayout(page)
-        col.setContentsMargins(0, 0, 8, 8)
-        col.setSpacing(6)
+        col.setContentsMargins(PAGE_MARGIN, 20, PAGE_MARGIN, PAGE_MARGIN)
+        col.setSpacing(4)
         s = self.settings
 
-        # Hotkeys
-        col.addWidget(overline("Hotkeys"))
-        keys = QGridLayout()
-        keys.setHorizontalSpacing(10)
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addWidget(self._icon_button(Glyph.BACK, "Back", lambda: self._show_page(0)))
+        header.addWidget(label("Settings", 28, weight=QFont.DemiBold, display=True))
+        header.addStretch(1)
+        col.addLayout(header)
+
+        self._group(col, "Controls")
         self.combo_start = self._hotkey_combo(s.start_hotkey)
         self.combo_stop = self._hotkey_combo(s.stop_hotkey)
-        keys.addWidget(QLabel("Start"), 0, 0)
-        keys.addWidget(self.combo_start, 0, 1)
-        keys.addWidget(QLabel("Stop"), 0, 2)
-        keys.addWidget(self.combo_stop, 0, 3)
-        keys.setColumnStretch(1, 1)
-        keys.setColumnStretch(3, 1)
-        col.addLayout(keys)
-        self.hotkey_note = QLabel("", objectName="hint")
+        col.addWidget(SettingsCard(Glyph.KEYBOARD, "Start hotkey", "Starts at the current mouse position", self.combo_start))
+        col.addWidget(SettingsCard(Glyph.KEYBOARD, "Stop hotkey", "Stops right away", self.combo_stop))
+        self.hotkey_note = label("", 12, "secondary")
         self.hotkey_note.setWordWrap(True)
+        self.hotkey_note.setContentsMargins(4, 4, 4, 0)
         self.hotkey_note.hide()
         col.addWidget(self.hotkey_note)
-        col.addSpacing(10)
 
-        # Safety
-        col.addWidget(overline("Safety"))
-        self.sw_focus = self._switch(
-            "Only click inside Arma Reforger", "Pauses while another window is active", s.require_game_focus
-        )
-        self.sw_mouse = self._switch(
-            "Stop when I move the mouse", "Grab the mouse to take back control", s.stop_on_mouse_move
-        )
-        col.addWidget(self.sw_focus)
-        col.addWidget(self.sw_mouse)
-        col.addSpacing(10)
+        self._group(col, "Safety")
+        self.sw_focus = self._toggle(s.require_game_focus)
+        self.sw_mouse = self._toggle(s.stop_on_mouse_move)
+        col.addWidget(SettingsCard(Glyph.GAME, "Only click inside Arma Reforger",
+                                   "Pauses while another window is in front", self.sw_focus))
+        col.addWidget(SettingsCard(Glyph.MOUSE, "Stop when I move the mouse",
+                                   "Grab the mouse to take back control", self.sw_mouse))
 
-        # Speed
-        col.addWidget(overline("Speed"))
-        self.sw_fast_esc = self._switch(
-            "Fast close", "Click the on-screen ESC button instead of the key", s.fast_esc
-        )
-        col.addWidget(self.sw_fast_esc)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(8)
+        self._group(col, "Speed")
+        self.sw_fast_esc = self._toggle(s.fast_esc)
+        col.addWidget(SettingsCard(Glyph.CLOSE, "Fast close",
+                                   "Click the ESC button on screen instead of pressing the key", self.sw_fast_esc))
+        timing = ExpanderCard(Glyph.TIMER, "Timing", "How long each step waits. The defaults suit most servers.")
         self.spins: dict[str, QDoubleSpinBox] = {}
-        spin_rows = (
-            ("wait_after_click", "Wait after click", 0.05),
-            ("connect_timeout", "Give up on a try after", 0.5),
-            ("pause_before_retry", "Pause before retry", 0.05),
-            ("escape_hold", "Hold ESC key for", 0.05),
-        )
-        for row, (name, label, step) in enumerate(spin_rows):
+        for name, text, step in (
+            ("wait_after_click", "Wait after clicking Join", 0.05),
+            ("connect_timeout", "Try again if nothing happens after", 0.5),
+            ("pause_before_retry", "Pause between attempts", 0.05),
+            ("escape_hold", "Hold the ESC key for", 0.05),
+        ):
             lo, hi = LIMITS[name]
             spin = QDoubleSpinBox(minimum=lo, maximum=hi, singleStep=step, decimals=2, suffix=" s")
             spin.setValue(getattr(s, name))
-            spin.setFixedWidth(92)
-            spin.setAlignment(Qt.AlignRight)
-            spin.setAccessibleName(label)
+            spin.setFixedWidth(110)
+            spin.setAccessibleName(text)
             spin.valueChanged.connect(self._queue_save)
             self.spins[name] = spin
-            grid.addWidget(QLabel(label, objectName="muted"), row, 0)
-            grid.addWidget(spin, row, 1, Qt.AlignRight)
-        col.addLayout(grid)
-        col.addSpacing(10)
+            timing.add_row(text, spin)
+        col.addWidget(timing)
 
-        # Alerts
-        col.addWidget(overline("When you're in"))
-        self.sw_sound = self._switch("Sound alert", "", s.sound)
-        col.addWidget(self.sw_sound)
-        self.sw_phone = self._switch(
-            "Notify my phone", "Free push through the ntfy app, no account needed", s.phone_notify
-        )
+        self._group(col, "When you're in the queue")
+        self.sw_sound = self._toggle(s.sound)
+        col.addWidget(SettingsCard(Glyph.VOLUME, "Play a sound", "Three short beeps", self.sw_sound))
+        self.sw_phone = self._toggle(s.phone_notify)
         self.sw_phone.toggled.connect(self._on_phone_toggled)
-        col.addWidget(self.sw_phone)
-        topic_row = QHBoxLayout()
-        topic_row.setSpacing(8)
-        self.topic_edit = QLineEdit(s.ntfy_topic, placeholderText="ntfy topic, e.g. aqj-7f3k92")
+        col.addWidget(SettingsCard(Glyph.PHONE, "Notify my phone",
+                                   "Free push through the ntfy app, no account needed", self.sw_phone))
+        self.phone_box = Card()
+        p_col = QVBoxLayout(self.phone_box)
+        p_col.setContentsMargins(56, 12, 16, 12)
+        p_col.setSpacing(8)
+        p_row = QHBoxLayout()
+        p_row.setSpacing(8)
+        self.topic_edit = QLineEdit(s.ntfy_topic, placeholderText="Topic name")
         self.topic_edit.setAccessibleName("ntfy topic")
         self.topic_edit.textChanged.connect(self._queue_save)
-        topic_row.addWidget(self.topic_edit, 1)
-        self.test_btn = QPushButton("Send test", cursor=Qt.PointingHandCursor)
+        p_row.addWidget(self.topic_edit, 1)
+        self.test_btn = QPushButton("Send test")
+        self.test_btn.setCursor(Qt.PointingHandCursor)
         self.test_btn.clicked.connect(self._send_test)
-        topic_row.addWidget(self.test_btn)
-        col.addLayout(topic_row)
-        self.topic_note = QLabel(
+        p_row.addWidget(self.test_btn)
+        p_col.addLayout(p_row)
+        self.topic_note = label(
             "Install ntfy on your phone and subscribe to this topic. "
             "Anyone who knows the name can read it, so keep it hard to guess.",
-            objectName="hint",
+            12, "secondary",
         )
         self.topic_note.setWordWrap(True)
-        col.addWidget(self.topic_note)
+        p_col.addWidget(self.topic_note)
+        col.addWidget(self.phone_box)
         self._on_phone_toggled(s.phone_notify, save=False)
-        col.addSpacing(10)
 
-        # Window
-        col.addWidget(overline("Window"))
-        self.sw_top = self._switch("Keep on top of other windows", "", s.always_on_top)
+        self._group(col, "Window")
+        self.sw_top = self._toggle(s.always_on_top)
         self.sw_top.toggled.connect(lambda _: self._apply_window_flags())
-        self.sw_tray = self._switch("Close to tray", "Keeps running when you close the window", s.close_to_tray)
-        col.addWidget(self.sw_top)
-        col.addWidget(self.sw_tray)
+        self.sw_tray = self._toggle(s.close_to_tray)
+        col.addWidget(SettingsCard(Glyph.PIN, "Keep on top", "Stay above other windows", self.sw_top))
+        col.addWidget(SettingsCard(Glyph.MINIMIZE, "Close to the tray",
+                                   "Keeps running in the notification area when you close the window", self.sw_tray))
 
-        col.addSpacing(14)
-        col.addWidget(rule())
-        footer = QHBoxLayout()
-        footer.addWidget(QLabel(f"v{__version__} · by lime98", objectName="hint"))
-        footer.addStretch(1)
-        repo = QPushButton("Source on GitHub", objectName="link", cursor=Qt.PointingHandCursor)
-        repo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
-        footer.addWidget(repo)
-        col.addLayout(footer)
+        self._group(col, "About")
+        source = QPushButton("Source code")
+        source.setCursor(Qt.PointingHandCursor)
+        source.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
+        col.addWidget(SettingsCard(Glyph.INFO, APP_NAME, f"Version {__version__} · by lime98 · MIT licence", source))
         col.addStretch(1)
 
         scroll.setWidget(page)
         return scroll
 
+    # ── Small builders ──────────────────────────────────────────────────────
+
+    def _group(self, col: QVBoxLayout, title: str) -> None:
+        col.addSpacing(24)
+        head = label(title, 14, weight=QFont.DemiBold)
+        head.setContentsMargins(2, 0, 0, 4)
+        col.addWidget(head)
+
+    def _icon_button(self, glyph: str, tip: str, slot) -> QToolButton:
+        btn = QToolButton()
+        btn.setProperty("flat", True)
+        btn.setText(glyph)
+        btn.setFont(theme.icon_font(16))
+        btn.setToolTip(tip)
+        btn.setAccessibleName(tip)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedSize(36, 36)
+        btn.clicked.connect(slot)
+        return btn
+
     def _hotkey_combo(self, value: str) -> QComboBox:
-        combo = QComboBox(cursor=Qt.PointingHandCursor)
+        combo = QComboBox()
         combo.addItems(HOTKEYS)
         combo.setCurrentText(value)
+        combo.setFixedWidth(110)
+        combo.setCursor(Qt.PointingHandCursor)
         combo.currentTextChanged.connect(self._on_hotkey_changed)
         return combo
 
-    def _switch(self, title: str, hint: str, checked: bool) -> SwitchRow:
-        sw = SwitchRow(title, hint)
-        sw.setChecked(checked)
+    def _toggle(self, checked: bool) -> ToggleSwitch:
+        sw = ToggleSwitch(checked)
         sw.toggled.connect(self._queue_save)
         return sw
 
     def _show_page(self, index: int) -> None:
         self.pages.setCurrentIndex(index)
-        self.nav_main.setChecked(index == 0)
-        self.nav_settings.setChecked(index == 1)
+
+    # ── Theme ───────────────────────────────────────────────────────────────
+
+    def apply_theme(self) -> None:
+        c = theme.colors()
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(theme.stylesheet(c))
+        winapi.set_title_bar_theme(int(self.winId()), c.dark)
+        self._render_activity()
+        self.update()
 
     # ── Settings ────────────────────────────────────────────────────────────
 
     def _collect(self) -> Settings:
-        s = Settings(
+        return Settings(
             start_hotkey=self.combo_start.currentText(),
             stop_hotkey=self.combo_stop.currentText(),
             fast_esc=self.sw_fast_esc.isChecked(),
@@ -342,8 +357,7 @@ class MainWindow(QMainWindow):
             always_on_top=self.sw_top.isChecked(),
             close_to_tray=self.sw_tray.isChecked(),
             **{name: spin.value() for name, spin in self.spins.items()},
-        )
-        return s.normalized()
+        ).normalized()
 
     def _queue_save(self, *_args) -> None:
         self._save_timer.start()
@@ -362,20 +376,20 @@ class MainWindow(QMainWindow):
             self.hotkey_note.show()
             return
         self.hotkey_note.hide()
-        self.key_start.setText(start)
-        self.key_stop.setText(stop)
         self._queue_save()
         self._rebind_hotkeys(start, stop)
+        self._render(self._ui_state, self._last_detail)
 
     def _rebind_hotkeys(self, start: str | None = None, stop: str | None = None) -> None:
         self.hotkeys.bind({"start": start or self.settings.start_hotkey, "stop": stop or self.settings.stop_hotkey})
 
+    def _keys(self) -> tuple[str, str]:
+        return self.combo_start.currentText(), self.combo_stop.currentText()
+
     def _on_phone_toggled(self, checked: bool, save: bool = True) -> None:
         if checked and not self.topic_edit.text().strip():
             self.topic_edit.setText(f"aqj-{secrets.token_hex(4)}")
-        for w in (self.topic_edit, self.test_btn):
-            w.setEnabled(checked)
-        self.topic_note.setVisible(checked)
+        self.phone_box.setVisible(checked)
         if save:
             self._queue_save()
 
@@ -391,38 +405,70 @@ class MainWindow(QMainWindow):
         )
 
     def _on_ntfy_result(self, error: str) -> None:
-        self.test_btn.setEnabled(self.sw_phone.isChecked())
+        self.test_btn.setEnabled(True)
         self.test_btn.setText("Send test")
-        self._log("Test notification sent" if not error else f"Phone notification failed: {error}")
-        if self.pages.currentIndex() == 1:
-            self.topic_note.setText(
-                "Sent. Check your phone." if not error else f"Could not send: {error}"
-            )
+        if error:
+            self.topic_note.setText(f"Couldn't send: {error}. Check your internet connection and the topic name.")
+            self._log(f"Phone notification failed: {error}")
+        else:
+            self.topic_note.setText("Sent. If nothing arrives, check that the topic on your phone is the same.")
+            self._log("Test notification sent")
 
     def _apply_window_flags(self) -> None:
-        on_top = getattr(self, "sw_top", None) is not None and self.sw_top.isChecked()
         visible = self.isVisible()
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, on_top)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, self.sw_top.isChecked())
         if visible:
             self.show()
 
+    # ── Status rendering ────────────────────────────────────────────────────
+
+    def _render(self, kind: str, detail: str = "") -> None:
+        self._ui_state = kind
+        self._last_detail = detail
+        start, stop = self._keys()
+        glyph, role, title, text, button, accent = {
+            "idle": (Glyph.READY, "accent", "Ready to join",
+                     detail or f"Hover over Join in the server browser, then press {start}.", "Start", True),
+            "countdown": (Glyph.TIMER, "accent", f"Starting in {self._countdown_left}",
+                          "Move the mouse over the Join button in the game.", "Cancel", False),
+            "running": (Glyph.SYNC, "accent", "Trying to join",
+                        f"{detail}. Press {stop} or move the mouse to stop." if detail else "", "Stop", False),
+            "paused": (Glyph.PAUSE, "caution", "Paused", detail, "Stop", False),
+            "success": (Glyph.DONE, "success", "You're in the queue", detail, "Start again", True),
+            "error": (Glyph.ERROR, "critical", "Something went wrong", detail, "Start", True),
+        }[kind]
+        self.status_icon.set_glyph(glyph, role)
+        self.status_title.setText(title)
+        self.status_detail.setText(text)
+        self.action.setText(button)
+        self.action.setProperty("accent", accent)
+        self.action.style().unpolish(self.action)
+        self.action.style().polish(self.action)
+        self.hotkey_card.description.setText(f"{start} starts at the mouse position, {stop} stops")
+        self.hotkey_card.description.show()
+        self._refresh_stats()
+
+    def _refresh_stats(self) -> None:
+        if self._started_at is None or self._ui_state in ("idle", "countdown"):
+            self.status_stats.setText("")
+            self.status_stats.hide()
+            return
+        end = self._finished_at or time.monotonic()
+        self.status_stats.setText(f"{fmt_elapsed(end - self._started_at)} · {plural(self._attempts, 'attempt')}")
+        self.status_stats.show()
+
     # ── Start / stop ────────────────────────────────────────────────────────
 
-    def _on_primary(self) -> None:
+    def _on_action(self) -> None:
         if self._ui_state in ("running", "paused"):
             self.stop()
         elif self._ui_state == "countdown":
             self._countdown.stop()
-            self._set_idle("Cancelled")
+            self._render("idle", "Cancelled.")
         else:
-            self._begin_countdown()
-
-    def _begin_countdown(self) -> None:
-        self._countdown_left = COUNTDOWN_SECONDS
-        self._ui_state = "countdown"
-        self._set_primary("Cancel", "stop")
-        self._update_countdown()
-        self._countdown.start()
+            self._countdown_left = COUNTDOWN_SECONDS
+            self._render("countdown")
+            self._countdown.start()
 
     def _tick_countdown(self) -> None:
         self._countdown_left -= 1
@@ -430,12 +476,7 @@ class MainWindow(QMainWindow):
             self._countdown.stop()
             self.start_at(winapi.get_cursor_pos())
         else:
-            self._update_countdown()
-
-    def _update_countdown(self) -> None:
-        self.status.set_state(
-            "countdown", f"Starting in {self._countdown_left}", "Move your mouse over the JOIN button in game"
-        )
+            self._render("countdown")
 
     def start_at(self, pos: tuple[int, int]) -> None:
         if self.joiner.running:
@@ -452,46 +493,33 @@ class MainWindow(QMainWindow):
             require_game_focus=s.require_game_focus,
             stop_on_mouse_move=s.stop_on_mouse_move,
         )
-        self.log_view.clear()
-        self.status.set_attempts(0)
+        self._clear_activity()
+        self._attempts = 0
         self._started_at = time.monotonic()
+        self._finished_at = None
+        self._render("running", "Starting")
         self._clock.start()
-        self._tick_clock()
-        self._ui_state = "running"
-        self._set_primary(f"Stop  ({s.stop_hotkey})", "stop")
         self.joiner.start(pos, config)
 
     def stop(self) -> None:
         if self._ui_state == "countdown":
             self._countdown.stop()
-            self._set_idle("Cancelled")
+            self._render("idle", "Cancelled.")
         self.joiner.stop()
-
-    def _set_primary(self, text: str, mode: str) -> None:
-        self.primary.setText(text)
-        self.primary.setProperty("mode", mode)
-        self.primary.style().unpolish(self.primary)
-        self.primary.style().polish(self.primary)
-
-    def _set_idle(self, detail: str) -> None:
-        self._ui_state = "idle"
-        self._clock.stop()
-        self.status.set_state("idle", "Ready", detail)
-        self._set_primary("Start", "start")
-
-    def _tick_clock(self) -> None:
-        if self._started_at is not None:
-            self.status.timer.setText(fmt_elapsed(time.monotonic() - self._started_at))
 
     # ── Worker events ───────────────────────────────────────────────────────
 
     def _connect_bridge(self) -> None:
         self.bridge.state.connect(self._on_state)
-        self.bridge.attempt.connect(self.status.set_attempts)
+        self.bridge.attempt.connect(self._on_attempt)
         self.bridge.log.connect(self._log)
         self.bridge.hotkey.connect(self._on_hotkey)
         self.bridge.hotkey_error.connect(self._on_hotkey_error)
         self.bridge.ntfy_result.connect(self._on_ntfy_result)
+
+    def _on_attempt(self, n: int) -> None:
+        self._attempts = n
+        self._refresh_stats()
 
     def _on_hotkey(self, action: str) -> None:
         if action == "start" and self._ui_state not in ("running", "paused"):
@@ -505,26 +533,17 @@ class MainWindow(QMainWindow):
         self._log(message)
 
     def _on_state(self, state: str, detail: str) -> None:
-        if state == "running":
-            self._ui_state = "running"
-            self.status.set_state("running", "Joining", detail)
-        elif state == "paused":
-            self._ui_state = "paused"
-            self.status.set_state("paused", "Paused", detail)
-        elif state == "success":
+        if state in ("success", "error", "idle"):
             self._clock.stop()
-            self._tick_clock()
-            self._ui_state = "success"
-            self.status.set_state("success", "In queue", detail)
-            self._set_primary("Start again", "start")
-            self._announce_success(detail)
-        elif state == "error":
-            self._clock.stop()
-            self._ui_state = "error"
-            self.status.set_state("error", "Something went wrong", detail)
-            self._set_primary("Start", "start")
+            self._finished_at = time.monotonic()
+        if state == "success":
+            elapsed = fmt_elapsed(self._finished_at - (self._started_at or self._finished_at))
+            self._render("success", f"{detail}. Keep the game open.")
+            self._announce_success(f"{detail}, in {elapsed}")
+        elif state == "idle":
+            self._render("idle", f"{detail}." if detail and not detail.endswith(".") else detail)
         else:
-            self._set_idle(detail)
+            self._render(state, detail)
 
     def _announce_success(self, detail: str) -> None:
         s = self.settings
@@ -536,13 +555,33 @@ class MainWindow(QMainWindow):
         if s.phone_notify and s.ntfy_topic:
             notify.send_ntfy_async(
                 s.ntfy_topic,
-                "In the queue",
+                "You're in the queue",
                 f"Arma Reforger: {detail}.",
                 lambda err: err and self.bridge.log.emit(f"Phone notification failed: {err}"),
             )
 
+    # ── Activity ────────────────────────────────────────────────────────────
+
     def _log(self, message: str) -> None:
-        self.log_view.appendPlainText(f"{time.strftime('%H:%M:%S')}  {message}")
+        entry = (time.strftime("%H:%M:%S"), message)
+        self._activity.append(entry)
+        self._append_entry(*entry)
+
+    def _append_entry(self, stamp: str, message: str) -> None:
+        c = theme.colors()
+        self.activity_view.appendHtml(
+            f'<span style="color:{c.text_tertiary.name()}">{stamp}</span>&nbsp;&nbsp;'
+            f'<span style="color:{c.text.name()}">{html.escape(message)}</span>'
+        )
+
+    def _render_activity(self) -> None:
+        self.activity_view.clear()
+        for entry in self._activity:
+            self._append_entry(*entry)
+
+    def _clear_activity(self) -> None:
+        self._activity.clear()
+        self.activity_view.clear()
 
     # ── Tray and lifecycle ──────────────────────────────────────────────────
 
@@ -553,13 +592,10 @@ class MainWindow(QMainWindow):
         self.tray = QSystemTrayIcon(self._icon, self)
         self.tray.setToolTip(APP_NAME)
         menu = QMenu(self)
-        show = QAction("Show", self, triggered=self.show_window)
-        stop = QAction("Stop", self, triggered=self.stop)
-        quit_ = QAction("Quit", self, triggered=self.quit)
-        menu.addAction(show)
-        menu.addAction(stop)
+        menu.addAction(QAction("Open", self, triggered=self.show_window))
+        menu.addAction(QAction("Stop", self, triggered=self.stop))
         menu.addSeparator()
-        menu.addAction(quit_)
+        menu.addAction(QAction("Quit", self, triggered=self.quit))
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(
             lambda reason: self.show_window() if reason == QSystemTrayIcon.Trigger else None
@@ -573,7 +609,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        winapi.use_dark_title_bar(int(self.winId()))
+        winapi.set_title_bar_theme(int(self.winId()), theme.is_dark())
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if not self._quitting and self.tray is not None and self.sw_tray.isChecked():
@@ -581,7 +617,7 @@ class MainWindow(QMainWindow):
             self.hide()
             if not self._tray_hint_shown:
                 self._tray_hint_shown = True
-                self.tray.showMessage(APP_NAME, "Still running here. Right-click to quit.", self._icon, 3000)
+                self.tray.showMessage(APP_NAME, "Still running in the notification area.", self._icon, 3000)
             return
         self._shutdown()
         event.accept()

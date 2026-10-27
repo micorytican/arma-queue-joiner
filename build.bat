@@ -26,7 +26,6 @@ if exist dist rmdir /s /q dist
     --name ArmaQueueJoiner ^
     --icon icon.ico ^
     --add-data "icon.ico;." ^
-    --add-data "aqj\ui\assets;aqj\ui\assets" ^
     --exclude-module tkinter ^
     --exclude-module unittest ^
     --exclude-module pydoc ^

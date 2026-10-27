@@ -27,7 +27,7 @@ Press **F4** at any time to stop. Moving the mouse also stops it, so you can alw
 
 ## What's new in 2.0
 
-- **New interface.** Clear status, timer and attempt counter; settings moved to their own tab.
+- **New interface** in the style of Windows 11. It follows your light or dark mode and your Windows accent colour. Status, time and attempts up front, settings on their own page.
 - **Safer.** Clicks only while Arma Reforger is the active window, and stops as soon as you move the mouse.
 - **Phone notifications** through the free [ntfy](https://ntfy.sh) app, no account needed.
 - **Works the same at any resolution.** Detection thresholds now scale with the screen, not fixed pixel counts.

@@ -1,187 +1,153 @@
-"""Colours, fonts and the Qt style sheet.
+"""Windows 11 look: follows the system light/dark mode and the user's accent colour.
 
-Look: a field instrument that sits next to Arma Reforger's own UI. Olive-black
-surfaces, hairline borders, warm off-white text and a single amber accent
-taken from the game's queue text. No gradients, no glow, small radii.
+The app is a Windows utility, so the platform is the design system. Colours
+are the WinUI 3 / Fluent values used by Settings and PowerToys; the accent
+comes from Windows, so every user sees their own colour.
 """
 
-from pathlib import Path
+from __future__ import annotations
 
-BG = "#121412"
-SURFACE = "#181B18"
-RAISED = "#1F231F"
-BORDER = "#2A2F2A"
-BORDER_STRONG = "#3B423B"
-TEXT = "#E7E5DD"
-MUTED = "#A0A69C"
-DIM = "#7F877C"
-ACCENT = "#E2A43B"
-ACCENT_HOVER = "#EDB55A"
-ACCENT_PRESSED = "#C98F2E"
-ON_ACCENT = "#17150F"
-SUCCESS = "#8DC667"
-DANGER = "#E06A5E"
-STEEL = "#93ACBF"
+from dataclasses import dataclass
 
-FONT = "Segoe UI Variable Text, Segoe UI"
-MONO = "Cascadia Mono, Consolas"
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPalette
 
-STATE_COLORS = {
-    "idle": DIM,
-    "countdown": ACCENT,
-    "running": ACCENT,
-    "paused": STEEL,
-    "success": SUCCESS,
-    "error": DANGER,
-}
+TEXT_FONT = "Segoe UI Variable Text"
+DISPLAY_FONT = "Segoe UI Variable Display"
+ICON_FONTS = ["Segoe Fluent Icons", "Segoe MDL2 Assets"]
 
-def stylesheet() -> str:
-    """Qt style sheet; built at runtime so image paths work when frozen."""
-    chevron = (Path(__file__).parent / "assets" / "chevron-down.svg").as_posix()
+
+class Glyph:
+    """Segoe Fluent Icons code points (same as Segoe MDL2 Assets on Windows 10)."""
+
+    SETTINGS = ""
+    BACK = ""
+    READY = ""       # play
+    SYNC = ""
+    PAUSE = ""
+    DONE = ""        # completed
+    ERROR = ""
+    TIMER = ""       # stopwatch
+    KEYBOARD = ""
+    GAME = ""
+    MOUSE = ""
+    CLOSE = ""
+    VOLUME = ""
+    PHONE = ""
+    PIN = ""
+    MINIMIZE = ""
+    INFO = ""
+    CHEVRON_DOWN = ""
+    CHEVRON_UP = ""
+    LINK = ""        # open in new window
+    HISTORY = ""
+
+
+@dataclass(frozen=True)
+class Colors:
+    dark: bool
+    background: QColor
+    card: QColor
+    card_hover: QColor
+    stroke: QColor
+    divider: QColor
+    text: QColor
+    text_secondary: QColor
+    text_tertiary: QColor
+    accent: QColor
+    on_accent: QColor
+    success: QColor
+    caution: QColor
+    critical: QColor
+    control_stroke: QColor
+
+
+def is_dark() -> bool:
+    return QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
+
+
+def colors() -> Colors:
+    accent = QGuiApplication.palette().color(QPalette.Accent)
+    if is_dark():
+        return Colors(
+            dark=True,
+            background=QColor("#202020"),
+            card=QColor("#2b2b2b"),
+            card_hover=QColor("#323232"),
+            stroke=QColor("#1d1d1d"),
+            divider=QColor("#3a3a3a"),
+            text=QColor("#ffffff"),
+            text_secondary=QColor("#c5c5c5"),
+            text_tertiary=QColor("#9e9e9e"),
+            accent=accent,
+            on_accent=QColor("#000000"),
+            success=QColor("#6ccb5f"),
+            caution=QColor("#fce100"),
+            critical=QColor("#ff99a4"),
+            control_stroke=QColor("#9e9e9e"),
+        )
+    return Colors(
+        dark=False,
+        background=QColor("#f3f3f3"),
+        card=QColor("#fbfbfb"),
+        card_hover=QColor("#f6f6f6"),
+        stroke=QColor("#e5e5e5"),
+        divider=QColor("#eaeaea"),
+        text=QColor("#1b1b1b"),
+        text_secondary=QColor("#5d5d5d"),
+        text_tertiary=QColor("#8a8a8a"),
+        accent=accent,
+        on_accent=QColor("#ffffff"),
+        success=QColor("#0f7b0f"),
+        caution=QColor("#9d5d00"),
+        critical=QColor("#c42b1c"),
+        control_stroke=QColor("#8a8a8a"),
+    )
+
+
+def font(size: int, weight: QFont.Weight = QFont.Normal, display: bool = False) -> QFont:
+    f = QFont(DISPLAY_FONT if display else TEXT_FONT)
+    f.setPixelSize(size)
+    f.setWeight(weight)
+    return f
+
+
+def icon_font(size: int) -> QFont:
+    f = QFont()
+    f.setFamilies(ICON_FONTS)
+    f.setPixelSize(size)
+    return f
+
+
+def stylesheet(c: Colors) -> str:
+    """Only the few things the native style does not cover. Everything else is native."""
+    accent = c.accent.name()
+    accent_hover = c.accent.lighter(110 if c.dark else 112).name()
+    accent_pressed = c.accent.darker(115).name()
     return f"""
-* {{
-    font-family: "Segoe UI Variable Text", "Segoe UI";
-    font-size: 13px;
-    color: {TEXT};
-    outline: none;
-}}
-QMainWindow, #root {{ background: {BG}; }}
-
-QLabel#overline {{
-    color: {DIM};
-    font-size: 10px;
-    font-weight: 600;
-}}
-QLabel#appTitle {{ font-size: 17px; font-weight: 600; }}
-QLabel#muted {{ color: {MUTED}; }}
-QLabel#hint {{ color: {DIM}; font-size: 12px; }}
-QLabel#stepNo {{ color: {ACCENT}; font-family: "Cascadia Mono", Consolas; font-size: 12px; }}
-QLabel#keycap {{
-    font-family: "Cascadia Mono", Consolas;
-    font-size: 11px;
-    color: {TEXT};
-    background: {RAISED};
-    border: 1px solid {BORDER_STRONG};
-    border-bottom-width: 2px;
-    border-radius: 3px;
-    padding: 0px 5px;
-}}
-
-QPushButton#nav {{
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: {MUTED};
-    padding: 6px 2px 5px 2px;
-    font-weight: 600;
-}}
-QPushButton#nav:hover {{ color: {TEXT}; }}
-QPushButton#nav:checked {{ color: {TEXT}; border-bottom-color: {ACCENT}; }}
-
-QFrame#card {{
-    background: {SURFACE};
-    border: 1px solid {BORDER};
-    border-radius: 4px;
-}}
-QFrame#rule {{ background: {BORDER}; max-height: 1px; min-height: 1px; border: none; }}
-
-QLabel#stateTitle {{ font-size: 24px; font-weight: 600; }}
-QLabel#timer {{ font-family: "Cascadia Mono", Consolas; font-size: 28px; }}
-QLabel#statNumber {{ font-family: "Cascadia Mono", Consolas; font-size: 13px; color: {MUTED}; }}
-
-QPushButton {{
-    background: {RAISED};
-    border: 1px solid {BORDER_STRONG};
-    border-radius: 4px;
-    padding: 7px 14px;
-    font-weight: 600;
-}}
-QPushButton:hover {{ border-color: {DIM}; }}
-QPushButton:pressed {{ background: {SURFACE}; }}
-QPushButton:focus {{ border-color: {ACCENT}; }}
-QPushButton#primary {{
-    background: {ACCENT};
-    border: 1px solid {ACCENT};
-    color: {ON_ACCENT};
-    font-size: 14px;
-    padding: 10px 14px;
-}}
-QPushButton#primary:hover {{ background: {ACCENT_HOVER}; border-color: {ACCENT_HOVER}; }}
-QPushButton#primary:pressed {{ background: {ACCENT_PRESSED}; }}
-QPushButton#primary[mode="stop"] {{
-    background: {RAISED};
-    border-color: {BORDER_STRONG};
-    color: {TEXT};
-}}
-QPushButton#primary[mode="stop"]:hover {{ border-color: {DANGER}; color: {DANGER}; }}
-QPushButton#link {{
-    background: transparent;
-    border: none;
-    color: {MUTED};
-    padding: 0;
-    font-weight: 400;
-    font-size: 12px;
-}}
-QPushButton#link:hover {{ color: {ACCENT}; }}
-
-QPlainTextEdit#log {{
-    background: {SURFACE};
-    border: 1px solid {BORDER};
-    border-radius: 4px;
-    padding: 6px 8px;
-    font-family: "Cascadia Mono", Consolas;
-    font-size: 11px;
-    color: {MUTED};
-    selection-background-color: {BORDER_STRONG};
-}}
-
-QComboBox, QDoubleSpinBox, QLineEdit {{
-    background: {RAISED};
-    border: 1px solid {BORDER_STRONG};
-    border-radius: 4px;
-    padding: 5px 8px;
-    min-height: 18px;
-    selection-background-color: {ACCENT};
-    selection-color: {ON_ACCENT};
-}}
-QComboBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {{ border-color: {DIM}; }}
-QComboBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {{ border-color: {ACCENT}; }}
-QLineEdit:disabled {{ color: {DIM}; border-color: {BORDER}; }}
-QComboBox::drop-down {{ border: none; width: 18px; }}
-QComboBox::down-arrow {{ image: url("{chevron}"); width: 10px; height: 6px; margin-right: 8px; }}
-QComboBox QAbstractItemView {{
-    background: {RAISED};
-    border: 1px solid {BORDER_STRONG};
-    selection-background-color: {BORDER_STRONG};
-    selection-color: {TEXT};
-    padding: 2px;
-}}
-QDoubleSpinBox {{ font-family: "Cascadia Mono", Consolas; }}
-QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ width: 0; border: none; }}
-QDoubleSpinBox QLineEdit {{
-    background: transparent; border: none; padding: 0; min-height: 0; margin: 0;
-}}
-
-QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
-QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: {BORDER_STRONG}; border-radius: 2px; min-height: 24px; }}
-QScrollBar::handle:vertical:hover {{ background: {DIM}; }}
-QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{
-    background: none; height: 0;
-}}
-
-QToolTip {{
-    background: {RAISED};
-    color: {TEXT};
-    border: 1px solid {BORDER_STRONG};
-    padding: 4px 6px;
-}}
-QMenu {{
-    background: {RAISED};
-    border: 1px solid {BORDER_STRONG};
-    padding: 4px;
-}}
-QMenu::item {{ padding: 6px 18px; border-radius: 3px; }}
-QMenu::item:selected {{ background: {BORDER_STRONG}; }}
-QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 6px; }}
-"""
+    QMainWindow, #page {{ background: {c.background.name()}; }}
+    QLabel {{ color: {c.text.name()}; }}
+    QLabel[role="secondary"] {{ color: {c.text_secondary.name()}; }}
+    QLabel[role="tertiary"] {{ color: {c.text_tertiary.name()}; }}
+    QPushButton[accent="true"] {{
+        background: {accent};
+        color: {c.on_accent.name()};
+        border: 1px solid {accent};
+        border-radius: 4px;
+        padding: 6px 20px;
+        min-height: 20px;
+        font-weight: 600;
+    }}
+    QPushButton[accent="true"]:hover {{ background: {accent_hover}; border-color: {accent_hover}; }}
+    QPushButton[accent="true"]:pressed {{ background: {accent_pressed}; border-color: {accent_pressed}; }}
+    QPushButton[accent="true"]:focus {{ border: 2px solid {c.text.name()}; }}
+    QToolButton[flat="true"] {{
+        background: transparent; border: none; border-radius: 4px; padding: 6px;
+        color: {c.text.name()};
+    }}
+    QToolButton[flat="true"]:hover {{ background: {c.card_hover.name()}; }}
+    QPlainTextEdit#activity {{
+        background: transparent; border: none;
+        color: {c.text.name()};
+    }}
+    """

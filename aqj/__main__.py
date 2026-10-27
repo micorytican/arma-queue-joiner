@@ -6,9 +6,9 @@ import ctypes
 import sys
 from pathlib import Path
 
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStyleFactory
 
 from . import APP_ID, APP_NAME
 
@@ -45,11 +45,9 @@ def main() -> int:
     from .ui import theme
     from .ui.window import MainWindow
 
-    font = QFont("Segoe UI Variable Text")
-    font.setPixelSize(13)
-    font.setHintingPreference(QFont.PreferNoHinting)
-    app.setFont(font)
-    app.setStyleSheet(theme.stylesheet())
+    if "windows11" in QStyleFactory.keys():
+        app.setStyle("windows11")
+    app.setFont(theme.font(14))
 
     icon = QIcon(resource("icon.ico"))
     window = MainWindow(icon)

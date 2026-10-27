@@ -176,17 +176,15 @@ def flash_taskbar(hwnd: int, count: int = 5) -> None:
     user32.FlashWindowEx(ctypes.byref(info))
 
 
-def use_dark_title_bar(hwnd: int) -> None:
-    """Ask Windows 10 (1809+) / 11 to draw a dark title bar. Ignored elsewhere."""
+def set_title_bar_theme(hwnd: int, dark: bool) -> None:
+    """Match the title bar to the app's light/dark mode (Windows 10 1809+ / 11)."""
     try:
         dwmapi = ctypes.WinDLL("dwmapi")
-        value = ctypes.c_int(1)
+        value = ctypes.c_int(1 if dark else 0)
         for attribute in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (new id, then old)
             if dwmapi.DwmSetWindowAttribute(
                 wintypes.HWND(hwnd), attribute, ctypes.byref(value), ctypes.sizeof(value)
             ) == 0:
                 break
-        caption = ctypes.c_int(0x00121412)  # DWMWA_CAPTION_COLOR (COLORREF 0x00BBGGRR)
-        dwmapi.DwmSetWindowAttribute(wintypes.HWND(hwnd), 35, ctypes.byref(caption), 4)
     except OSError:
         pass
