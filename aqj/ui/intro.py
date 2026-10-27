@@ -1,11 +1,17 @@
 """lime98 intro.
 
 Beats (about two and a half seconds):
-1. A Su-27 style head-up radar picture: scan, contacts, designator closes, lock.
-2. A beat of stillness: only the lock box blinks.
-3. The camera dives into the locked target, a flash cuts to black.
-4. A Cold War terminal types the callsign key by key and the last key lands
-   with a flash and a shake.
+1. The CRT warms up from a single bright line.
+2. A Su-27 style head-up radar picture (as documented for the DCS / LockOn
+   Flanker): scan, contact bars, the designator slides onto the target.
+3. Lock (single target track): other contacts drop off, the targeting box sits
+   on the target, the range scale appears on the left with the launch-range
+   ticks and a closing range caret, А marks a valid lock and ПР flashes once
+   the target is inside launch range.
+4. The camera dives into the target and the picture tears; a Cold War terminal
+   types the callsign and the last key lands with a flash and a shake.
+
+1980s display noise: a rolling bar and tearing bursts on the big beats.
 
 Everything is drawn with QPainter from one function of time, so the same code
 plays the startup splash and renders the README GIF. All green phosphor.
@@ -14,6 +20,7 @@ plays the startup splash and renders the README GIF. All green phosphor.
 from __future__ import annotations
 
 import math
+import random
 from functools import cache
 from pathlib import Path
 
@@ -24,12 +31,14 @@ from PySide6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetricsF,
+    QImage,
     QKeyEvent,
     QLinearGradient,
     QMouseEvent,
     QPainter,
     QPaintEvent,
     QPen,
+    QPolygonF,
     QRadialGradient,
 )
 from PySide6.QtWidgets import QApplication, QWidget
@@ -40,17 +49,23 @@ HUD_DIM = QColor("#2f8a4b")
 WHITE = QColor("#f4fff6")
 
 # Timeline, seconds
-POWER_ON = 0.18
-SCAN = (0.10, 0.55)  # the scan bar crosses the display once
-LOCK = 0.70  # designator closes on the target
-ZOOM = 0.86  # stillness ends, the camera dives into the target
-CUT = 1.00  # flash, cut to the terminal
-TYPE_LABEL = 1.02  # "> CALLSIGN"
-TYPE_NAME = 1.16  # first letter of the callsign
-KEY_GAP = 0.085  # seconds per key
+POWER_ON = 0.15  # CRT warms up from a single line
+SCAN = (0.15, 0.85)  # the scan bar crosses the display once
+LOCK = 1.00  # designator reaches the target: single target track
+LAUNCH_OK = 1.42  # range caret passes the max launch range tick, ПР
+ZOOM = 1.62  # the camera dives into the target
+CUT = 1.74  # tear, flash, cut to the terminal
+TYPE_LABEL = 1.75  # "> CALLSIGN"
+TYPE_NAME = 1.82  # first letter of the callsign
+KEY_GAP = 0.055  # seconds per key
 CALLSIGN = "LIME98"
 IMPACT = TYPE_NAME + KEY_GAP * (len(CALLSIGN) - 1)  # the last key lands hard
-DURATION = IMPACT + 0.8
+DURATION = IMPACT + 0.55
+
+# Range scale ticks, as a share of the scale from the top
+R_MAX = 0.38  # max launch range, non-manoeuvring target
+R_MAN = 0.58  # max launch range, manoeuvring target
+R_MIN = 0.86  # min launch range
 
 AZIMUTH = 60  # degrees each side, as on the HUD scale
 CONTACTS = (  # (azimuth deg, range 0..1 from bottom, friendly)
@@ -71,6 +86,11 @@ def load_fonts() -> str:
     font_id = QFontDatabase.addApplicationFont(str(FONT_FILE))
     families = QFontDatabase.applicationFontFamilies(font_id) if font_id >= 0 else []
     return families[0] if families else "Bahnschrift"
+
+
+def _caret(x: float, y: float, size: float) -> QPolygonF:
+    """A caret pointing right at the range scale, tip at (x, y)."""
+    return QPolygonF([QPointF(x, y), QPointF(x - size, y - size * 0.55), QPointF(x - size, y + size * 0.55)])
 
 
 def _clamp(x: float) -> float:
@@ -99,6 +119,21 @@ class RadarIntro:
         self._title_family = load_fonts()
 
     def paint(self, p: QPainter, w: int, h: int, t: float, frame: int = 0) -> None:
+        tear = self.tear_strength(t)
+        if tear > 0:  # draw off-screen, then tear it into shifted slices
+            layer = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+            lp = QPainter(layer)
+            self._scene(lp, w, h, t, frame)
+            lp.end()
+            self._torn(p, layer, w, h, t, tear)
+        else:
+            self._scene(p, w, h, t, frame)
+        self._rolling_bar(p, w, h, t)
+        self._scanlines(p, w, h)
+        self._warm_up(p, w, h, t)
+        self._flash(p, w, h, t)
+
+    def _scene(self, p: QPainter, w: int, h: int, t: float, frame: int) -> None:
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         p.fillRect(QRectF(0, 0, w, h), PANEL)
@@ -110,8 +145,6 @@ class RadarIntro:
         else:
             self._terminal(p, w, h, t)
         p.restore()
-        self._scanlines(p, w, h)
-        self._flash(p, w, h, t)
 
     # 1. HUD radar picture -------------------------------------------------------------
 
@@ -125,9 +158,9 @@ class RadarIntro:
         return QPointF(r.center().x() + r.width() / 2 * az / AZIMUTH, r.bottom() - r.height() * rng)
 
     def _hud(self, p: QPainter, w: int, h: int, t: float, frame: int) -> None:
-        on = _ease_out(t / POWER_ON) * (1.0 if t > POWER_ON else (0.4, 1.0, 0.6)[frame % 3])
+        on = 1.0 if t > POWER_ON + 0.1 else (0.5, 1.0, 0.7)[frame % 3]
         locked = t >= LOCK
-        still = 0.35 if locked else 1.0  # everything but the lock box steps back
+        still = 0.5 if locked else 1.0  # the search picture steps back once locked
         r = self.scope_rect(w, h)
         target = self.contact_pos(w, h, TARGET)
         line = QPen(_with_alpha(HUD, 0.85 * on * still), 1.4)
@@ -163,6 +196,9 @@ class RadarIntro:
             p.setFont(self._mono(h * 0.06, bold=True))
             p.setPen(_with_alpha(HUD, on * still))
             p.drawText(QPointF(w * 0.07, h * 0.2), "ИЗЛ")
+            p.setFont(self._mono(h * 0.045))
+            p.setPen(_with_alpha(HUD_DIM, on))
+            p.drawText(QPointF(w * 0.07, h * 0.27), "ЗПС")
 
         scan = _clamp((t - SCAN[0]) / (SCAN[1] - SCAN[0]))
         if 0 < scan < 1:
@@ -175,6 +211,8 @@ class RadarIntro:
             p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()))
         for i, (az, _rng, friendly) in enumerate(CONTACTS):
             if (az + AZIMUTH) / (2 * AZIMUTH) >= scan and t <= SCAN[1]:
+                continue
+            if locked and i != TARGET:  # single target track: the others drop off
                 continue
             pos = self.contact_pos(w, h, i)
             p.setPen(QPen(_with_alpha(HUD, on * (1.0 if i == TARGET else still)), 2.2))
@@ -194,15 +232,59 @@ class RadarIntro:
             for s in (-1, 1):
                 x = pos.x() + s * gap
                 p.drawLine(QPointF(x, pos.y() - gap * 0.7), QPointF(x, pos.y() + gap * 0.7))
-        if locked:  # stillness: only the lock box blinks
-            blink = int((t - LOCK) * 10) % 2 == 0
-            box = h * 0.07
-            p.setPen(QPen(_with_alpha(HUD, 1.0 if blink else 0.25), 2.2))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRect(QRectF(target.x() - box, target.y() - box, 2 * box, 2 * box))
-            p.setFont(self._mono(h * 0.09, bold=True))
-            p.setPen(_with_alpha(HUD, 1.0 if blink else 0.4))
-            p.drawText(QPointF(w * 0.83, h * 0.58), "А")
+        if locked:
+            self._stt(p, w, h, t, target)
+
+    @staticmethod
+    def range_caret(t: float) -> float:
+        """Range caret on the scale (0 top .. 1 bottom); it closes as the target nears."""
+        return 0.12 + (R_MAX - 0.12) * (t - LOCK) / (LAUNCH_OK - LOCK)
+
+    def _stt(self, p: QPainter, w: int, h: int, t: float, target: QPointF) -> None:
+        """Single target track symbology."""
+        grow = _ease_out((t - LOCK) / 0.15)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Targeting box over the target, the marker inside with its flight vector
+        half = h * (0.16 - 0.09 * grow)
+        p.setPen(QPen(HUD, 2.0))
+        p.drawRect(QRectF(target.x() - half, target.y() - half, half * 2, half * 2))
+        p.drawLine(target, QPointF(target.x() - h * 0.012, target.y() + h * 0.05))
+        p.setBrush(HUD)  # antenna position dot
+        p.drawEllipse(QPointF(target.x() + h * 0.02, target.y() + h * 0.11), h * 0.008, h * 0.008)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Range scale on the left: launch-range ticks and the closing caret
+        x = w * 0.13
+        top = h * 0.30
+        length = h * 0.55
+        drawn = length * grow
+        p.setPen(QPen(HUD, 1.6))
+        p.drawLine(QPointF(x, top), QPointF(x, top + drawn))
+        p.setPen(QPen(HUD, 3.2))
+        for frac in (R_MAX, R_MAN, R_MIN):
+            if frac * length <= drawn:
+                y = top + frac * length
+                p.drawLine(QPointF(x, y), QPointF(x + h * 0.035, y))
+        caret = self.range_caret(t)
+        caret_y = top + caret * length
+        if caret * length <= drawn:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(HUD)
+            p.drawPolygon(_caret(x - h * 0.008, caret_y, h * 0.03))
+            p.setFont(self._mono(h * 0.045, bold=True))
+            p.setPen(HUD)
+            km = max(0, round(52 - 60 * caret))
+            p.drawText(QPointF(x - h * 0.14, caret_y + h * 0.015), f"{km:02d}")
+
+        # А marks a valid lock; ПР (launch authorised) flashes inside launch range
+        p.setFont(self._mono(h * 0.08, bold=True))
+        p.setPen(HUD)
+        p.drawText(QPointF(w * 0.84, h * 0.62), "А")
+        if t >= LAUNCH_OK and int((t - LAUNCH_OK) * 8) % 2 == 0:
+            p.setFont(self._mono(h * 0.11, bold=True))
+            fm = QFontMetricsF(p.font())
+            p.drawText(QPointF(w / 2 - fm.horizontalAdvance("ПР") / 2, h * 0.97), "ПР")
 
     # 2. Dive into the target ------------------------------------------------------
 
@@ -285,9 +367,57 @@ class RadarIntro:
     # Shared effects -------------------------------------------------------------------
 
     @staticmethod
+    def tear_strength(t: float) -> float:
+        """Short bursts of picture tearing on the big beats, like a 1980s monitor losing sync."""
+        bursts = (
+            (0.52, 0.03, 0.35),
+            (LOCK, 0.06, 0.6),
+            (ZOOM + 0.06, CUT - ZOOM - 0.04, 1.0),
+            (IMPACT, 0.07, 0.8),
+        )
+        return max((peak for start, length, peak in bursts if start <= t < start + length), default=0.0)
+
+    @staticmethod
+    def _torn(p: QPainter, layer: QImage, w: int, h: int, t: float, strength: float) -> None:
+        rng = random.Random(int(t * 120))
+        y = 0
+        while y < h:
+            band = rng.randint(2, 18)
+            shift = rng.uniform(-1, 1) * w * 0.08 * strength if rng.random() < 0.55 else 0.0
+            p.drawImage(QPointF(shift, y), layer, QRectF(0, y, w, band))
+            if shift and rng.random() < 0.3:  # bright smear where the line slipped
+                p.fillRect(QRectF(0, y, w, 1), _with_alpha(HUD, 0.25 * strength))
+            y += band
+        for _ in range(int(60 * strength)):  # static
+            speck = QRectF(rng.uniform(0, w), rng.uniform(0, h), rng.uniform(1, 6), 1)
+            p.fillRect(speck, _with_alpha(HUD, rng.uniform(0.2, 0.7)))
+
+    @staticmethod
+    def _rolling_bar(p: QPainter, w: int, h: int, t: float) -> None:
+        """A faint bright band rolling down the tube, as on old sets."""
+        y = ((t / 2.4) % 1.0) * (h * 1.4) - h * 0.2
+        g = QLinearGradient(QPointF(0, y - h * 0.12), QPointF(0, y + h * 0.12))
+        g.setColorAt(0.0, QColor(140, 255, 158, 0))
+        g.setColorAt(0.5, QColor(140, 255, 158, 14))
+        g.setColorAt(1.0, QColor(140, 255, 158, 0))
+        p.fillRect(QRectF(0, y - h * 0.12, w, h * 0.24), QBrush(g))
+
+    @staticmethod
+    def _warm_up(p: QPainter, w: int, h: int, t: float) -> None:
+        """CRT power-on: a bright line opens into the picture."""
+        if t >= POWER_ON:
+            return
+        k = _ease_out(t / POWER_ON)
+        half = max(1.0, h * 0.5 * k)
+        p.fillRect(QRectF(0, 0, w, h / 2 - half), PANEL)
+        p.fillRect(QRectF(0, h / 2 + half, w, h / 2 - half), PANEL)
+        inset = w * (1 - k) * 0.3
+        p.fillRect(QRectF(inset, h / 2 - 1.5, w - 2 * inset, 3), _with_alpha(WHITE, 1 - k))
+
+    @staticmethod
     def _shake(t: float, h: float) -> QPointF:
         amp = 0.0
-        for start, size in ((CUT, 0.02), (IMPACT, 0.04)):
+        for start, size in ((LOCK, 0.008), (CUT, 0.02), (IMPACT, 0.04)):
             age = t - start
             if 0 <= age < 0.4:
                 amp += h * size * math.exp(-age / 0.08)
@@ -296,7 +426,7 @@ class RadarIntro:
     @staticmethod
     def _flash(p: QPainter, w: int, h: int, t: float) -> None:
         strength = 0.0
-        for start, peak in ((CUT, 0.75), (IMPACT, 0.7)):
+        for start, peak in ((CUT, 0.6), (IMPACT, 0.7)):
             age = t - start
             if -0.01 <= age < 0.25:
                 strength = max(strength, peak * math.exp(-max(0.0, age) / 0.045))

@@ -16,16 +16,17 @@ def bright(img: QImage, x0: int, x1: int, y0: int, y1: int) -> int:
     return sum(1 for x in range(x0, x1, 4) for y in range(y0, y1, 4) if QColor(img.pixel(x, y)).green() > 150)
 
 
-@pytest.mark.parametrize("t", [0.0, 0.1, 0.4, 0.7, 0.86, 0.95, 1.0, 1.1, 1.3, 1.59, 2.0, 2.4, 5.0])
+@pytest.mark.parametrize("t", [0.0, 0.07, 0.4, 0.53, 1.0, 1.03, 1.3, 1.45, 1.7, 1.75, 1.9, 2.1, 2.6, 5.0])
 def test_every_moment_renders(qapp, t):
     assert not render(t).isNull()
 
 
 def test_timeline_order():
-    beats = [intro.POWER_ON, intro.SCAN[1], intro.LOCK, intro.ZOOM, intro.CUT, intro.TYPE_LABEL,
-             intro.TYPE_NAME, intro.IMPACT, intro.DURATION]  # fmt: skip
+    beats = [intro.POWER_ON, intro.SCAN[1], intro.LOCK, intro.LAUNCH_OK, intro.ZOOM, intro.CUT,
+             intro.TYPE_LABEL, intro.TYPE_NAME, intro.IMPACT, intro.DURATION]  # fmt: skip
     assert beats == sorted(beats)
-    assert intro.DURATION < 2.6
+    assert intro.DURATION < 2.8
+    assert intro.CUT > intro.DURATION - intro.CUT  # more radar than logo
 
 
 def test_bundled_title_font_loads(qapp):
@@ -36,7 +37,7 @@ def test_bundled_title_font_loads(qapp):
 
 def test_final_frame_shows_callsign(qapp):
     assert bright(render(intro.DURATION), 100, 540, 110, 230) > 80
-    assert bright(render(0.0), 100, 540, 110, 230) == 0
+    assert bright(render(0.0), 100, 540, 110, 230) * 4 < bright(render(intro.DURATION), 100, 540, 110, 230)
 
 
 def test_callsign_is_typed_key_by_key():
@@ -59,6 +60,33 @@ def test_zoom_dives_into_the_locked_target(qapp):
     img = render(intro.CUT - 0.01)
     assert bright(img, 0, 640, 0, 300) > 40
     assert not render(intro.ZOOM - 0.01).isNull()
+
+
+def test_range_caret_reaches_launch_range_at_pr():
+    assert intro.RadarIntro.range_caret(intro.LOCK) < intro.R_MAX
+    assert intro.RadarIntro.range_caret(intro.LAUNCH_OK) == pytest.approx(intro.R_MAX)
+    assert intro.R_MAX < intro.R_MAN < intro.R_MIN
+
+
+def test_other_contacts_drop_off_after_lock(qapp):
+    scene = intro.RadarIntro()
+    others = [scene.contact_pos(640, 300, i) for i in range(len(intro.CONTACTS)) if i != intro.TARGET]
+
+    def lit(img):
+        return sum(
+            bright(img, int(q.x()) - 12, int(q.x()) + 12, int(q.y()) - 4, int(q.y()) + 6) for q in others
+        )
+
+    assert lit(render(intro.LOCK - 0.05)) > 0
+    assert lit(render(intro.LOCK + 0.2)) == 0
+
+
+def test_tearing_only_on_the_big_beats():
+    assert intro.RadarIntro.tear_strength(intro.LOCK + 0.01) > 0
+    assert intro.RadarIntro.tear_strength(intro.CUT - 0.02) > 0
+    assert intro.RadarIntro.tear_strength(intro.IMPACT + 0.01) > 0
+    assert intro.RadarIntro.tear_strength(0.3) == 0
+    assert intro.RadarIntro.tear_strength(intro.DURATION) == 0
 
 
 def test_window_can_be_skipped(qtbot):
