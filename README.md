@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/intro.gif" width="640" alt="A Su-27 head-up display locks a contact, a 3D Su-27 rushes past and the callsign LIME98 lands">
+  <img src="assets/intro.gif" width="640" alt="A head-up radar locks a contact, a Su-27 tears in and stops, then a terminal types the callsign LIME98">
 </p>
 
 # Arma Reforger Queue Joiner
@@ -154,3 +154,5 @@ installer/       Inno Setup script
 ## License
 
 MIT, by lime98 aka micorytican.
+
+The intro uses the Black Ops One font by the Black-Ops Project Authors under the SIL Open Font License 1.1 (`aqj/ui/fonts/OFL.txt`).

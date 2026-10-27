@@ -30,7 +30,7 @@ echo  Version %VERSION%
 %PY% tools\version_info.py build\version_info.txt >nul || goto :fail
 
 set PYI_ARGS=--noconfirm --clean --windowed --icon icon.ico --version-file build\version_info.txt ^
- --add-data "icon.ico;." --exclude-module tkinter --exclude-module unittest --exclude-module pydoc ^
+ --add-data "icon.ico;." --add-data "aqj\ui\fonts;aqj\ui\fonts" --exclude-module tkinter --exclude-module unittest --exclude-module pydoc ^
  --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick --exclude-module PySide6.QtPdf ^
  --exclude-module PySide6.QtOpenGL --distpath "%DIST%"
 
