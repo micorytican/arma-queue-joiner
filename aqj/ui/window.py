@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 from .. import APP_NAME, REPO_URL, __version__, detection, logs, net, notify, updates, winapi
 from ..gamelog import LogFollower, QueueWatch, Stage, default_logs_dir, latest_console_log
 from ..hotkeys import HotkeyListener
-from ..i18n import LANGUAGE_NAMES, attempts, set_language, tr
+from ..i18n import LANGUAGE_NAMES, attempts, set_language, system_language, tr
 from ..joiner import Joiner, JoinerConfig, Message, State, msg
 from ..screen import ScreenVision
 from ..settings import HOTKEYS, LIMITS, Settings
@@ -114,6 +114,8 @@ class MainWindow(QMainWindow):
     def __init__(self, icon: QIcon, settings: Settings | None = None):
         super().__init__()
         self.settings = (settings or Settings.load()).normalized()
+        if not self.settings.language:  # first start: pick once, then it shows as a normal choice
+            self.settings.language = system_language()
         set_language(self.settings.language)
         self._icon = icon
         self._quitting = False
@@ -391,7 +393,7 @@ class MainWindow(QMainWindow):
         self._group(col, tr("group.app"))
         self.combo_lang = combo_box()
         for code, name in LANGUAGE_NAMES.items():
-            self.combo_lang.addItem(name or tr("set.language.system"), code)
+            self.combo_lang.addItem(name, code)
         self.combo_lang.setCurrentIndex(max(0, self.combo_lang.findData(s.language)))
         self.combo_lang.setMinimumWidth(150)
         self.combo_lang.currentIndexChanged.connect(self._on_language_changed)

@@ -2,6 +2,8 @@
 
 import numpy as np
 import pytest
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QApplication, QWidget
 
 from aqj import i18n
 from aqj.joiner import State, msg
@@ -84,6 +86,43 @@ def window(qtbot, monkeypatch):
     yield w
     w._shutdown()
     i18n.set_language("en")
+
+
+def test_first_start_takes_the_windows_language(qtbot, monkeypatch):
+    monkeypatch.setattr(win, "HotkeyListener", FakeHotkeys)
+    monkeypatch.setattr(win, "system_language", lambda: "uk")
+    w = win.MainWindow(win.QIcon(), Settings())
+    qtbot.addWidget(w)
+    try:
+        assert w.settings.language == "uk"
+        assert w.combo_lang.currentData() == "uk"
+        assert [w.combo_lang.itemData(i) for i in range(w.combo_lang.count())] == ["en", "uk"]
+    finally:
+        w._shutdown()
+        i18n.set_language("en")
+
+
+def test_no_stray_windows_while_building(qtbot, monkeypatch):
+    """Widgets shown before they have a parent flash up as small windows at startup."""
+    monkeypatch.setattr(win, "HotkeyListener", FakeHotkeys)
+    shown: list[str] = []
+
+    class Spy(QObject):
+        def eventFilter(self, obj, event):
+            if event.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow():
+                shown.append(type(obj).__name__)
+            return False
+
+    spy = Spy()
+    app = QApplication.instance()
+    app.installEventFilter(spy)
+    try:
+        w = win.MainWindow(win.QIcon(), Settings(language="en"))
+        qtbot.addWidget(w)
+        assert shown == []
+    finally:
+        app.removeEventFilter(spy)
+        w._shutdown()
 
 
 def test_opens_ready(window):
