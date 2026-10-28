@@ -4,6 +4,19 @@ All notable changes to this project are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- A second alert when the queue lets you in and you are in the game, with the server name. The app reads Arma Reforger's own log to know this.
+- An alert when the server drops you from the queue.
+- Settings to choose which alerts you get: when you get into the queue, when you are in the game, or both.
+- *Game log* row on the Diagnostics page.
+
+### Changed
+
+- Phone notifications are sent as urgent, so they pop up even while you use other apps, and no longer start with an emoji.
+
 ## [2.0.0] - 2026-10-28
 
 A full rewrite. Settings from 1.x are carried over.

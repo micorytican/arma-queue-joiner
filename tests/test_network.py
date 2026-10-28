@@ -41,8 +41,7 @@ def test_ntfy_is_sent_as_json_with_unicode_title(sent):
         "topic": "aqj-test",
         "title": "Ви в черзі",
         "message": "Спроб: 3",
-        "priority": 4,
-        "tags": ["video_game"],
+        "priority": 5,
     }
     assert req.get_header("User-agent").startswith("ArmaQueueJoiner/")
 

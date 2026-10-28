@@ -31,7 +31,9 @@ def send_ntfy(topic: str, title: str, message: str) -> None:
     """Publish as JSON, which keeps non-Latin titles (e.g. Ukrainian) intact."""
     if not topic:
         raise ValueError("topic is empty")
-    body = {"topic": topic, "title": title, "message": message, "priority": 4, "tags": ["video_game"]}
+    # Priority 5 ("urgent") makes the ntfy app pop up and vibrate even while you use other apps.
+    # No tags: ntfy would turn them into emoji in front of the title.
+    body = {"topic": topic, "title": title, "message": message, "priority": 5}
     net.request(
         NTFY_SERVER, data=json.dumps(body).encode("utf-8"), headers={"Content-Type": "application/json"}
     )
