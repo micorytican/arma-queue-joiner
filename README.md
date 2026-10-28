@@ -70,6 +70,8 @@ Settings live in `%APPDATA%\ArmaQueueJoiner\settings.json`. Settings from 1.x ar
 
 Anyone who knows the topic name can read its messages, so keep it hard to guess.
 
+**iPhone:** if a notification only shows up after you open ntfy, delete the subscription in ntfy and add the same topic again, then press **Send test**. Also check that ntfy is allowed to show banners and that Background App Refresh is on.
+
 ### Discord
 
 1. In Discord open the channel settings › **Integrations** › **Webhooks** › **New webhook** › **Copy webhook URL**.
