@@ -1,6 +1,6 @@
 """Arma Reforger Queue Joiner, by lime98 aka micorytican."""
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 APP_NAME = "Arma Queue Joiner"
 APP_ID = "ArmaQueueJoiner"
 REPO_URL = "https://github.com/micorytican/arma-queue-joiner"
