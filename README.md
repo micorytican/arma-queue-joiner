@@ -34,7 +34,7 @@ Press **F4** to stop at any time. Moving the mouse also stops it, so you can alw
 ## Features
 
 - **Looks and feels like Windows 11.** Follows your light or dark mode and your accent colour.
-- **English and Ukrainian.** Picks your Windows language; change it in Settings.
+- **English and Ukrainian.** Starts in Ukrainian on a Ukrainian Windows and in English everywhere else; change it in Settings.
 - **Safe by default.** Clicks only while Arma Reforger is the active window and stops when you move the mouse.
 - **Alerts:** sound, Windows notification, phone push through the free [ntfy](https://ntfy.sh) app, Discord message through a webhook.
 - **Knows when you are in.** After the queue it follows the game's own log and alerts you when you are on the server, with the server name.
@@ -56,7 +56,7 @@ Press **F4** to stop at any time. Moving the mouse also stops it, so you can alw
 | Play a sound | On | Three short beeps |
 | Notify my phone | Off | Push through ntfy, see below |
 | Post to Discord | Off | Message to a channel through a webhook, see below |
-| Language | Same as Windows | English or Ukrainian |
+| Language | English (Ukrainian on a Ukrainian Windows) | English or Ukrainian |
 | Keep on top / Close to the tray | Off / On | Window behaviour |
 | Check for updates | On | One request to GitHub at startup, nothing else is sent |
 

@@ -125,8 +125,10 @@ class SettingsCard(Card):
         self.title = label(title, 14, wrap=True)
         texts.addWidget(self.title)
         self.description = label(description, 12, "secondary", wrap=True)
-        self.description.setVisible(bool(description))
         texts.addWidget(self.description)
+        # Only hide here: showing a widget before it has a parent opens it as its own window for a moment.
+        if not description:
+            self.description.hide()
         texts.addStretch(1)
         row.addLayout(texts, 1)
         if control is not None:

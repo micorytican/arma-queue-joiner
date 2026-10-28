@@ -59,4 +59,14 @@ def test_key_param_does_not_clash():
 
 def test_unknown_language_falls_back_to_english():
     assert i18n.set_language("de") == "en"
-    assert i18n.set_language("system") in ("en", "uk")
+    assert i18n.set_language("system") == "en"
+    assert i18n.set_language("") == "en"
+
+
+def test_system_language_is_english_unless_ukrainian(monkeypatch):
+    import types
+
+    for langid, expected in ((0x0422, "uk"), (0x0407, "en"), (0x0409, "en"), (0x0415, "en")):
+        kernel32 = types.SimpleNamespace(GetUserDefaultUILanguage=lambda v=langid: v)
+        monkeypatch.setattr(i18n.ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), raising=False)
+        assert i18n.system_language() == expected

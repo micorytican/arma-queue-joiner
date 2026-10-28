@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ctypes
 
-LANGUAGE_NAMES = {"system": None, "en": "English", "uk": "Українська"}
+LANGUAGE_NAMES = {"en": "English", "uk": "Українська"}
 
 STRINGS: dict[str, tuple[str, str]] = {
     # Main page
@@ -211,7 +211,6 @@ STRINGS: dict[str, tuple[str, str]] = {
     ),
     "set.language": ("Language", "Мова"),
     "set.language.text": ("Changes right away", "Змінюється одразу"),
-    "set.language.system": ("Same as Windows", "Як у Windows"),
     "set.diagnostics": ("Diagnostics", "Діагностика"),
     "set.diagnostics.text": (
         "See what the app sees and find the log files",
@@ -307,6 +306,7 @@ _current = "en"
 
 
 def system_language() -> str:
+    """Ukrainian on a Ukrainian Windows, English everywhere else."""
     try:
         langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
     except (AttributeError, OSError):
@@ -315,9 +315,9 @@ def system_language() -> str:
 
 
 def set_language(setting: str) -> str:
-    """Apply 'system', 'en' or 'uk'. Returns the language actually used."""
+    """Apply 'en' or 'uk'; anything else means English. Returns the language used."""
     global _current
-    _current = system_language() if setting == "system" else (setting if setting in ("en", "uk") else "en")
+    _current = setting if setting in ("en", "uk") else "en"
     return _current
 
 

@@ -51,3 +51,10 @@ def test_unknown_hotkey_falls_back():
 
 def test_topic_is_sanitized():
     assert Settings.from_dict({"ntfy_topic": "  my topic/../x?  "}).ntfy_topic == "mytopicx"
+
+
+def test_language_is_picked_on_first_start():
+    assert Settings().normalized().language == ""
+    assert Settings(language="system").normalized().language == ""  # old "Same as Windows"
+    assert Settings(language="de").normalized().language == ""
+    assert Settings(language="uk").normalized().language == "uk"
